@@ -14,19 +14,5 @@ def run_tests_groups():
         # 7. Non-capturing groups
         ("(?:orange)", "orange", {0: "orange"}),
         ("(?:orange)-(\\d+)", "orange-123", {0: "orange-123", 1: "123"}),
-
-        # 17. Backreferences
-        ("(a)\\1", "aa", {0: "aa"}),
-        ("(a)\\1", "ab", None),
-        ("([a-z]+) \\1", "test test", {0: "test test"}),
-        ("([a-z]+) \\1", "test best", None),
-        ("(?i)(a)\\1", "aA", {0: "aA"}),
-
-        # 18. Named Backreferences
-        ("(?P<x>a) (?P=x)", "a a", {0: "a a", "x": "a"}),
-        ("(?P<tag><[a-z]+>).*?(?P=tag)", "<tag>content<tag>", {0: "<tag>content<tag>", "tag": "<tag>"}),
-        ("(?P<tag><[a-z]+>).*?(?P=tag)", "<tag>content</tag>", None),
-        ("(<[a-z]+>).*?\\1", "<tag>content<tag>", {0: "<tag>content<tag>"}),
-        ("(<[a-z]+>).*?\\1", "<tag>content</tag>", None),
     ]
     run_suite("Group Tests", cases)

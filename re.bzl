@@ -11,9 +11,11 @@ Edge Cases: Negated sets [^abc], escaped characters in sets, and literal escapin
 Designed for environments without 're' module, recursion, or 'while' loops.
 """
 
+MAX_GROUP_NAME_LEN = 32
+MAX_EXECUTION_STEPS = 100000
+
 # Bytecode Instructions
 OP_CHAR = 0  # Match specific character
-MAX_GROUP_NAME_LEN = 32
 OP_ANY = 1  # Match any character (including \n)
 OP_SPLIT = 2  # Jump to pc1 or pc2
 OP_JUMP = 3  # Jump to pc
@@ -27,10 +29,6 @@ OP_NOT_WORD_BOUNDARY = 10  # Match if no word/non-word transition
 OP_ANY_NO_NL = 11  # Match any character EXCEPT \n
 OP_ANCHOR_LINE_START = 12  # Match start or after \n
 OP_ANCHOR_LINE_END = 13  # Match end or before \n
-OP_BACKREF = 14  # Match captured group content
-OP_LOOKAHEAD = 15  # Start of lookahead block
-OP_LOOKAHEAD_END = 16  # End of lookahead block (Success)
-OP_LOOKBEHIND = 17  # Start of lookbehind block
 
 def _is_word_char(c):
     """Returns True if c is [a-zA-Z0-9_]."""
@@ -195,52 +193,9 @@ def _compile_regex(pattern, start_group_id = 0):
                     is_capturing = False
                     i += 2
                 elif la == "=" or la == "!":
-                    # Lookahead (?=...) or (?!...)
-                    is_negative = (la == "!")
-
-                    # Iterative compilation:
-                    # Emit LOOKAHEAD_START placeholder
-                    instructions.append((OP_LOOKAHEAD, (None, is_negative), None, None))
-                    start_pc = len(instructions) - 1
-
-                    stack.append({
-                        "type": "lookahead",
-                        "start_pc": start_pc,
-                        "is_negative": is_negative,
-                        "branch_starts": [],
-                        "exit_jumps": [],
-                    })
-
-                    i += 2
-                    is_group_start = False
-
+                    fail("Lookarounds not supported")
                 elif la == "<":
-                    # Lookbehind (?<=...) or (?<!...)
-                    if i + 3 < pattern_len:
-                        lb = pattern[i + 3]
-                        if lb == "=" or lb == "!":
-                            is_negative = (lb == "!")
-
-                            # Emit LOOKBEHIND placeholder
-                            instructions.append((OP_LOOKBEHIND, (None, is_negative), None, None))
-                            start_pc = len(instructions) - 1
-
-                            stack.append({
-                                "type": "lookbehind",
-                                "start_pc": start_pc,
-                                "is_negative": is_negative,
-                                "branch_starts": [],
-                                "exit_jumps": [],
-                            })
-
-                            i += 3
-                            is_group_start = False
-                        else:
-                            # Malformed or named group syntax error?
-                            # (?<name> is not supported, we use (?P<name>
-                            pass
-                    else:
-                        pass
+                    fail("Lookbehinds not supported")
 
                 elif la == "P" and i + 3 < pattern_len:
                     if pattern[i + 3] == "<":
@@ -255,25 +210,7 @@ def _compile_regex(pattern, start_group_id = 0):
                             group_name = pattern[start_name:end_name]
                             i = end_name  # Skip past >
                     elif pattern[i + 3] == "=":
-                        # Named Backreference (?P=name)
-                        start_name = i + 4
-                        end_name = -1
-                        for k in range(start_name, min(start_name + MAX_GROUP_NAME_LEN, pattern_len)):
-                            if pattern[k] == ")":
-                                end_name = k
-                                break
-                        if end_name != -1:
-                            ref_name = pattern[start_name:end_name]
-                            if ref_name in named_groups:
-                                gid = named_groups[ref_name]
-                                instructions.append((OP_BACKREF, (gid, case_insensitive), None, None))
-                                i = end_name  # Skip past )
-                                is_group_start = False  # It's an atom, not a group start
-                            else:
-                                fail("Unknown group name: %s" % ref_name)
-                        else:
-                            # Malformed
-                            pass
+                        fail("Named backreferences not supported")
                 else:
                     # Check for flags e.g. (?i), (?ms), (?-s)
                     # We check looking forward
@@ -348,39 +285,6 @@ def _compile_regex(pattern, start_group_id = 0):
                     start_pc_fix = top["start_pc"]
                     i = _handle_quantifier(pattern, i, instructions, atom_start = start_pc_fix)
 
-                elif top["type"] == "lookahead":
-                    # End of lookahead block
-                    # Emit LOOKAHEAD_END
-                    instructions.append((OP_LOOKAHEAD_END, None, None, None))
-
-                    # Fix up LOOKAHEAD_START to jump over the block
-                    # LOOKAHEAD_START is at top["start_pc"]
-                    # Opcode 15: (jump_target, is_negative)
-                    start_pc = top["start_pc"]
-                    is_negative = top["is_negative"]
-                    jump_target = len(instructions)
-                    instructions[start_pc] = (OP_LOOKAHEAD, (jump_target, is_negative), None, None)
-
-                    # Lookahead assertions are zero-width, so they don't quantify normally?
-                    # But they can be quantified? e.g. (?=a)+
-                    # Usually assertions are not quantified.
-                    # But if they are, we handle it.
-                    i = _handle_quantifier(pattern, i, instructions, atom_start = start_pc)
-
-                elif top["type"] == "lookbehind":
-                    # End of lookbehind block
-                    # Append ANCHOR_END (8) and MATCH (5) to ensure it matches at the end of substring
-                    instructions.append((OP_ANCHOR_END, None, None, None))
-                    instructions.append((OP_MATCH, None, None, None))
-
-                    # Fix up LOOKBEHIND start
-                    start_pc = top["start_pc"]
-                    is_negative = top["is_negative"]
-                    jump_target = len(instructions)
-                    instructions[start_pc] = (OP_LOOKBEHIND, (jump_target, is_negative), None, None)
-
-                    i = _handle_quantifier(pattern, i, instructions, atom_start = start_pc)
-
         elif char == "|":
             if stack and stack[-1]["type"] == "group":
                 group_ctx = stack[-1]
@@ -412,9 +316,7 @@ def _compile_regex(pattern, start_group_id = 0):
                 elif next_c == "B":
                     instructions.append((OP_NOT_WORD_BOUNDARY, None, None, None))
                 elif next_c >= "1" and next_c <= "9":
-                    # Backreference \1 .. \9
-                    gid = int(next_c)
-                    instructions.append((OP_BACKREF, (gid, case_insensitive), None, None))
+                    fail("Backreferences not supported")
                 else:
                     # Handle standard escapes
                     literal_char = None
@@ -773,45 +675,9 @@ def _check_simple_match(inst, char):
         return (in_set != is_negated)
     return False
 
-def _check_backref(inst, regs, input_str, char_idx, input_len):
-    gid, case_insensitive = inst[1]
-    start_idx = regs[gid * 2]
-    end_idx = regs[gid * 2 + 1]
-
-    if start_idx != -1 and end_idx != -1:
-        captured = input_str[start_idx:end_idx]
-        cap_len = len(captured)
-
-        if char_idx + cap_len <= input_len:
-            sub = input_str[char_idx:char_idx + cap_len]
-            if case_insensitive:
-                # Naive case insensitive check
-                for k in range(cap_len):
-                    c1 = sub[k]
-                    c2 = captured[k]
-                    if c1 == c2:
-                        continue
-                    v1 = _get_case_variants(c1)
-                    v2 = _get_case_variants(c2)
-                    common = False
-                    for x in v1:
-                        for y in v2:
-                            if x == y:
-                                common = True
-                                break
-                        if common:
-                            break
-                    if not common:
-                        return False, 0
-                return True, cap_len
-            else:
-                return (sub == captured), cap_len
-    return False, 0
-
 def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
     next_threads = []
     new_waiting_threads = []
-    lookarounds = []
     match_regs = None
 
     for pc, regs in batch:
@@ -822,18 +688,6 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
             if match_regs == None:
                 match_regs = regs
             break
-        elif itype == OP_LOOKAHEAD:
-            jump_target, is_negative = inst[1]
-            lookarounds.append((pc, regs, jump_target, is_negative, False))
-            continue
-        elif itype == OP_LOOKBEHIND:
-            jump_target, is_negative = inst[1]
-            lookarounds.append((pc, regs, jump_target, is_negative, True))
-            continue
-        elif itype == OP_LOOKAHEAD_END:
-            if match_regs == None:
-                match_regs = regs
-            break
 
         if char == None:
             continue
@@ -841,15 +695,6 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
         match_found = False
         if itype in [OP_CHAR, OP_ANY, OP_ANY_NO_NL, OP_SET]:
             match_found = _check_simple_match(inst, char)
-        elif itype == OP_BACKREF:
-            matched, cap_len = _check_backref(inst, regs, input_str, char_idx, input_len)
-            if matched:
-                target_idx = char_idx + cap_len
-                new_waiting_threads.append((target_idx, pc + 1, list(regs)))
-                if cap_len == 0:
-                    closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs, char_idx)
-                    for c_pc, c_regs in closure:
-                        next_threads.append((c_pc, c_regs))
 
         if match_found:
             closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs, char_idx + 1)
@@ -858,7 +703,7 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
                 # The caller usually handles visited_next.
                 # But we are returning a list.
                 next_threads.append((c_pc, c_regs))
-    return next_threads, new_waiting_threads, lookarounds, match_regs
+    return next_threads, new_waiting_threads, match_regs
 
 # Stack Frame Indices
 FRAME_INSTRUCTIONS = 0
@@ -869,15 +714,11 @@ FRAME_THREADS = 4
 FRAME_NEXT_THREADS = 5
 FRAME_WAITING_THREADS = 6
 FRAME_PHASE = 7
-FRAME_PENDING_LOOKAROUNDS = 8
-FRAME_CHILD_RESULT = 9
-FRAME_MATCH_REGS = 10
-FRAME_START_PC = 11
-FRAME_END_PC = 12
-FRAME_LOOKAROUND_CTX = 13
-FRAME_INPUT_STR = 14
-FRAME_CURRENT_LA = 15
-FRAME_VISITED_NEXT = 16
+FRAME_MATCH_REGS = 8
+FRAME_START_PC = 9
+FRAME_END_PC = 10
+FRAME_INPUT_STR = 11
+FRAME_VISITED_NEXT = 12
 
 def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
     if initial_regs == None:
@@ -894,20 +735,22 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
         [],  # FRAME_NEXT_THREADS
         {},  # FRAME_WAITING_THREADS
         "INIT",  # FRAME_PHASE
-        [],  # FRAME_PENDING_LOOKAROUNDS
-        None,  # FRAME_CHILD_RESULT
         None,  # FRAME_MATCH_REGS
         0,  # FRAME_START_PC
         len(instructions),  # FRAME_END_PC
-        None,  # FRAME_LOOKAROUND_CTX
         input_str,  # FRAME_INPUT_STR
-        None,  # FRAME_CURRENT_LA
         {},  # FRAME_VISITED_NEXT
     ]]
 
     final_result = None
 
-    for _step in range(100000):
+    # Dynamic execution limit based on input size and complexity
+    # Base limit is MAX_EXECUTION_STEPS, but scale up for long inputs
+    limit = MAX_EXECUTION_STEPS
+    if len(input_str) > 0:
+        limit = max(limit, len(input_str) * len(instructions))
+
+    for _step in range(limit):
         if not stack:
             break
 
@@ -984,7 +827,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
             processing_queue = frame[FRAME_THREADS]
             frame[FRAME_THREADS] = []  # Clear, will be refilled by lookaround continuations
 
-            n_threads, n_waiting, lookarounds, match = _process_batch(
+            n_threads, n_waiting, match = _process_batch(
                 frame[FRAME_INSTRUCTIONS],
                 processing_queue,
                 char,
@@ -1007,84 +850,13 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
                     frame[FRAME_WAITING_THREADS][t_idx] = []
                 frame[FRAME_WAITING_THREADS][t_idx].append((t_pc, t_regs))
 
-            if lookarounds:
-                frame[FRAME_PENDING_LOOKAROUNDS] = lookarounds
-                frame[FRAME_PHASE] = "PROCESSING_LOOKAROUNDS"
-
             # If no lookarounds, we loop back. frame["threads"] is empty, so next iter will advance char.
-
-        elif phase == "PROCESSING_LOOKAROUNDS":
-            if not frame[FRAME_PENDING_LOOKAROUNDS]:
-                frame[FRAME_PHASE] = "RUNNING"
-                continue
-
-            la = frame[FRAME_PENDING_LOOKAROUNDS].pop(0)
-            pc, regs, jump_target, is_negative, is_lookbehind = la
-            frame[FRAME_CURRENT_LA] = la
-
-            child_start_pc = pc + 1
-            child_end_pc = jump_target
-
-            if is_lookbehind:
-                child_input = frame[FRAME_INPUT_STR][:frame[FRAME_CHAR_IDX]]
-                child_start_index = 0
-            else:
-                child_input = frame[FRAME_INPUT_STR]
-                child_start_index = frame[FRAME_CHAR_IDX]
-
-            child_frame = [
-                frame[FRAME_INSTRUCTIONS],  # FRAME_INSTRUCTIONS
-                child_start_index,  # FRAME_START_INDEX
-                regs,  # FRAME_INITIAL_REGS
-                child_start_index,  # FRAME_CHAR_IDX
-                [],  # FRAME_THREADS
-                [],  # FRAME_NEXT_THREADS
-                {},  # FRAME_WAITING_THREADS
-                "INIT",  # FRAME_PHASE
-                [],  # FRAME_PENDING_LOOKAROUNDS
-                None,  # FRAME_CHILD_RESULT
-                None,  # FRAME_MATCH_REGS
-                child_start_pc,  # FRAME_START_PC
-                child_end_pc,  # FRAME_END_PC
-                la,  # FRAME_LOOKAROUND_CTX
-                child_input,  # FRAME_INPUT_STR
-                None,  # FRAME_CURRENT_LA
-                {},  # FRAME_VISITED_NEXT
-            ]
-
-            stack.append(child_frame)
-            frame[FRAME_PHASE] = "WAITING_FOR_CHILD"
-
-        elif phase == "WAITING_FOR_CHILD":
-            res = frame[FRAME_CHILD_RESULT]
-            pc, regs, jump_target, is_negative, is_lookbehind = frame[FRAME_CURRENT_LA]
-
-            matched = (res != None)
-
-            if matched != is_negative:
-                new_regs = res if matched else regs
-                closure = _get_epsilon_closure(
-                    frame[FRAME_INSTRUCTIONS],
-                    frame[FRAME_INPUT_STR],
-                    len(frame[FRAME_INPUT_STR]),
-                    jump_target,
-                    new_regs,
-                    frame[FRAME_CHAR_IDX],
-                )
-
-                for c_pc, c_regs in closure:
-                    frame[FRAME_THREADS].append((c_pc, c_regs))
-
-            frame[FRAME_PHASE] = "PROCESSING_LOOKAROUNDS"
 
         elif phase == "DONE":
             stack.pop()
             if not stack:
                 final_result = frame[FRAME_MATCH_REGS]
                 break
-            else:
-                parent = stack[-1]
-                parent[FRAME_CHILD_RESULT] = frame[FRAME_MATCH_REGS]
 
     return final_result
 

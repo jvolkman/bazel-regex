@@ -99,23 +99,13 @@ def run_tests_api():
     expected = "bbbc"
     assert_eq(res, expected, "sub 'a+'->'b'")
 
-    # Test 2: Backreferences
-    res = sub("(\\w+)=(\\d+)", "\\2=\\1", "a=1 b=2")
-    expected = "1=a 2=b"
-    assert_eq(res, expected, "sub backref")
-
-    # Test 3: Function replacement
+    # Test 2: Function replacement
     def upper_repl(match):
         return match.upper()
 
     res = sub("a+", upper_repl, "abaac")
     expected = "AbAAc"
     assert_eq(res, expected, "sub function")
-
-    # Test 4: Named Backreferences
-    res = sub("(?P<name>\\w+)", "Hello \\g<name>", "World")
-    expected = "Hello World"
-    assert_eq(res, expected, "sub named backref")
 
     print("--- Testing split ---")
 
