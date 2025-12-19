@@ -702,9 +702,6 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
         if match_found:
             closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs, char_idx + 1)
             for c_pc, c_regs in closure:
-                # We need to deduplicate here? Caller handles deduplication via visited_next?
-                # The caller usually handles visited_next.
-                # But we are returning a list.
                 next_threads.append((c_pc, c_regs))
     return next_threads, match_regs
 
@@ -752,9 +749,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
             if match_regs == None:
                 match_regs = batch_match
             else:
-                # If we have a match, we only overwrite if the new match is "better"
-                # For now, we assume later matches (longer) are better if they start at same pos?
-                # Actually, standard greedy behavior prefers longer matches.
+                # Standard greedy behavior: prefer longer matches (which appear later in the loop)
                 match_regs = batch_match
 
         current_threads = next_threads
