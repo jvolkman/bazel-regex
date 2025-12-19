@@ -12,7 +12,6 @@ Designed for environments without 're' module, recursion, or 'while' loops.
 """
 
 MAX_GROUP_NAME_LEN = 32
-MAX_EXECUTION_STEPS = 100000
 
 # Bytecode Instructions
 OP_CHAR = 0  # Match specific character
