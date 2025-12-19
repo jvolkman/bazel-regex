@@ -677,7 +677,6 @@ def _check_simple_match(inst, char):
 
 def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
     next_threads = []
-    new_waiting_threads = []
     match_regs = None
 
     for pc, regs in batch:
@@ -703,162 +702,67 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
                 # The caller usually handles visited_next.
                 # But we are returning a list.
                 next_threads.append((c_pc, c_regs))
-    return next_threads, new_waiting_threads, match_regs
-
-# Stack Frame Indices
-FRAME_INSTRUCTIONS = 0
-FRAME_START_INDEX = 1
-FRAME_INITIAL_REGS = 2
-FRAME_CHAR_IDX = 3
-FRAME_THREADS = 4
-FRAME_NEXT_THREADS = 5
-FRAME_WAITING_THREADS = 6
-FRAME_PHASE = 7
-FRAME_MATCH_REGS = 8
-FRAME_START_PC = 9
-FRAME_END_PC = 10
-FRAME_INPUT_STR = 11
-FRAME_VISITED_NEXT = 12
+    return next_threads, match_regs
 
 def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
     if initial_regs == None:
         initial_regs = [-1] * num_regs
 
-    # Initialize stack with a list-based frame
-    # Order must match FRAME_* constants
-    stack = [[
-        instructions,  # FRAME_INSTRUCTIONS
-        start_index,  # FRAME_START_INDEX
-        initial_regs,  # FRAME_INITIAL_REGS
-        start_index,  # FRAME_CHAR_IDX
-        [],  # FRAME_THREADS
-        [],  # FRAME_NEXT_THREADS
-        {},  # FRAME_WAITING_THREADS
-        "INIT",  # FRAME_PHASE
-        None,  # FRAME_MATCH_REGS
-        0,  # FRAME_START_PC
-        len(instructions),  # FRAME_END_PC
-        input_str,  # FRAME_INPUT_STR
-        {},  # FRAME_VISITED_NEXT
-    ]]
+    input_len = len(input_str)
 
-    final_result = None
+    # Current active threads: list of (pc, regs)
+    current_threads = _get_epsilon_closure(
+        instructions,
+        input_str,
+        input_len,
+        0,
+        initial_regs,
+        start_index,
+    )
 
-    # Dynamic execution limit based on input size and complexity
-    # Base limit is MAX_EXECUTION_STEPS, but scale up for long inputs
-    limit = MAX_EXECUTION_STEPS
-    if len(input_str) > 0:
-        limit = max(limit, len(input_str) * len(instructions))
+    match_regs = None
 
-    for _step in range(limit):
-        if not stack:
+    # Main Loop: Iterate over input string
+    # We go up to input_len inclusive to handle matches at the very end (like $)
+    for char_idx in range(start_index, input_len + 1):
+        char = input_str[char_idx] if char_idx < input_len else None
+
+        # Unanchored Search Injection
+        if not anchored and char_idx <= input_len:
+            start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx)
+            for t in start_closure:
+                current_threads.append(t)
+
+        # Process current threads against character
+        next_threads, batch_match = _process_batch(
+            instructions,
+            current_threads,
+            char,
+            char_idx,
+            input_str,
+            input_len,
+        )
+
+        if batch_match:
+            # Prefer longer matches (greedy)
+            if match_regs == None:
+                match_regs = batch_match
+            else:
+                # If we have a match, we only overwrite if the new match is "better"
+                # For now, we assume later matches (longer) are better if they start at same pos?
+                # Actually, standard greedy behavior prefers longer matches.
+                match_regs = batch_match
+
+        current_threads = next_threads
+
+        # Optimization: If no threads left, break
+        if not current_threads and match_regs:
             break
 
-        frame = stack[-1]
-        phase = frame[FRAME_PHASE]
+        if not current_threads and not match_regs and char_idx > input_len:
+            break
 
-        if phase == "INIT":
-            frame[FRAME_THREADS] = _get_epsilon_closure(
-                frame[FRAME_INSTRUCTIONS],
-                frame[FRAME_INPUT_STR],
-                len(frame[FRAME_INPUT_STR]),
-                frame[FRAME_START_PC],
-                frame[FRAME_INITIAL_REGS],
-                frame[FRAME_START_INDEX],
-            )
-            frame[FRAME_PHASE] = "RUNNING"
-
-        elif phase == "RUNNING":
-            # If no threads to process for this step
-            if not frame[FRAME_THREADS]:
-                # Move next_threads to threads for next step
-                frame[FRAME_THREADS] = frame[FRAME_NEXT_THREADS]
-                frame[FRAME_NEXT_THREADS] = []
-                frame[FRAME_VISITED_NEXT] = {}
-
-                # Check for completion conditions
-                if not frame[FRAME_THREADS] and not frame[FRAME_WAITING_THREADS]:
-                    is_anchored = False
-                    if len(frame[FRAME_INSTRUCTIONS]) > 1 and frame[FRAME_INSTRUCTIONS][1][0] == OP_ANCHOR_START:
-                        is_anchored = True
-
-                    if len(stack) == 1 and not is_anchored and frame[FRAME_CHAR_IDX] < len(frame[FRAME_INPUT_STR]):
-                        pass  # Will inject unanchored search below
-                    else:
-                        frame[FRAME_PHASE] = "DONE"
-                        continue
-
-                char_idx = frame[FRAME_CHAR_IDX]
-                input_len_frame = len(frame[FRAME_INPUT_STR])
-                if char_idx > input_len_frame:
-                    frame[FRAME_PHASE] = "DONE"
-                    continue
-
-                # Advance character
-                frame[FRAME_CHAR_IDX] += 1
-                char_idx += 1  # Update local var
-
-                # Handle Waiting Threads for the NEW char_idx
-                if char_idx in frame[FRAME_WAITING_THREADS]:
-                    waking = frame[FRAME_WAITING_THREADS].pop(char_idx)
-                    for w_pc, w_regs in waking:
-                        closure = _get_epsilon_closure(frame[FRAME_INSTRUCTIONS], frame[FRAME_INPUT_STR], input_len_frame, w_pc, w_regs, char_idx)
-                        for c_pc, c_regs in closure:
-                            frame[FRAME_THREADS].append((c_pc, c_regs))
-
-                # Unanchored Search Injection (Root Frame Only)
-                if len(stack) == 1 and not anchored:
-                    is_anchored = False
-                    if len(frame[FRAME_INSTRUCTIONS]) > 1 and frame[FRAME_INSTRUCTIONS][1][0] == OP_ANCHOR_START:
-                        is_anchored = True
-
-                    if not is_anchored and char_idx <= input_len_frame and frame[FRAME_MATCH_REGS] == None:
-                        start_closure = _get_epsilon_closure(frame[FRAME_INSTRUCTIONS], frame[FRAME_INPUT_STR], input_len_frame, 0, frame[FRAME_INITIAL_REGS], char_idx)
-                        for c_pc, c_regs in start_closure:
-                            frame[FRAME_THREADS].append((c_pc, c_regs))
-
-                continue  # Loop back to process new 'threads'
-
-            # Process current batch
-            char_idx = frame[FRAME_CHAR_IDX]
-            input_len_frame = len(frame[FRAME_INPUT_STR])
-            char = frame[FRAME_INPUT_STR][char_idx] if char_idx < input_len_frame else None
-
-            processing_queue = frame[FRAME_THREADS]
-            frame[FRAME_THREADS] = []  # Clear, will be refilled by lookaround continuations
-
-            n_threads, n_waiting, match = _process_batch(
-                frame[FRAME_INSTRUCTIONS],
-                processing_queue,
-                char,
-                char_idx,
-                frame[FRAME_INPUT_STR],
-                input_len_frame,
-            )
-
-            if match:
-                frame[FRAME_MATCH_REGS] = match
-
-            for c_pc, c_regs in n_threads:
-                state_key = "%d_%s" % (c_pc, ",".join([str(x) for x in c_regs]))
-                if state_key not in frame[FRAME_VISITED_NEXT]:
-                    frame[FRAME_NEXT_THREADS].append((c_pc, c_regs))
-                    frame[FRAME_VISITED_NEXT][state_key] = True
-
-            for t_idx, t_pc, t_regs in n_waiting:
-                if t_idx not in frame[FRAME_WAITING_THREADS]:
-                    frame[FRAME_WAITING_THREADS][t_idx] = []
-                frame[FRAME_WAITING_THREADS][t_idx].append((t_pc, t_regs))
-
-            # If no lookarounds, we loop back. frame["threads"] is empty, so next iter will advance char.
-
-        elif phase == "DONE":
-            stack.pop()
-            if not stack:
-                final_result = frame[FRAME_MATCH_REGS]
-                break
-
-    return final_result
+    return match_regs
 
 def _execute(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
     return _execute_core(instructions, input_str, num_regs, start_index, initial_regs, anchored)
