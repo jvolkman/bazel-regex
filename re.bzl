@@ -11,24 +11,26 @@ Edge Cases: Negated sets [^abc], escaped characters in sets, and literal escapin
 Designed for environments without 're' module, recursion, or 'while' loops.
 """
 
-# Bytecode Instructions:
-# 0: CHAR (char) - Match specific character
-# 1: ANY - Match any character (including \n)
-# 2: SPLIT (pc1, pc2) - Jump to pc1 or pc2
-# 3: JUMP (pc) - Jump to pc
-# 4: SAVE (reg_id) - Save current index
-# 5: MATCH - Success
-# 6: SET (list_of_chars_and_ranges, is_negated) - Match any in set
-# 7: ANCHOR_START (^) - Match absolute start
-# 8: ANCHOR_END ($) - Match absolute end
-# 9: WORD_BOUNDARY (\b) - Match if word/non-word transition
-# 10: NOT_WORD_BOUNDARY (\B) - Match if no word/non-word transition
-# 11: ANY_NO_NL (.) - Match any character EXCEPT \n
-# 12: ANCHOR_LINE_START (^ multiline) - Match start or after \n
-# 13: ANCHOR_LINE_END ($ multiline) - Match end or before \n
-# 14: BACKREF (group_id, is_case_insensitive) - Match captured group content
-# 15: LOOKAHEAD (jump_target, is_negative) - Start of lookahead block
-# 16: LOOKAHEAD_END - End of lookahead block (Success)
+# Bytecode Instructions
+# Bytecode Instructions
+OP_CHAR = 0  # Match specific character
+OP_ANY = 1  # Match any character (including \n)
+OP_SPLIT = 2  # Jump to pc1 or pc2
+OP_JUMP = 3  # Jump to pc
+OP_SAVE = 4  # Save current index
+OP_MATCH = 5  # Success
+OP_SET = 6  # Match any in set
+OP_ANCHOR_START = 7  # Match absolute start
+OP_ANCHOR_END = 8  # Match absolute end
+OP_WORD_BOUNDARY = 9  # Match if word/non-word transition
+OP_NOT_WORD_BOUNDARY = 10  # Match if no word/non-word transition
+OP_ANY_NO_NL = 11  # Match any character EXCEPT \n
+OP_ANCHOR_LINE_START = 12  # Match start or after \n
+OP_ANCHOR_LINE_END = 13  # Match end or before \n
+OP_BACKREF = 14  # Match captured group content
+OP_LOOKAHEAD = 15  # Start of lookahead block
+OP_LOOKAHEAD_END = 16  # End of lookahead block (Success)
+OP_LOOKBEHIND = 17  # Start of lookbehind block
 
 def _is_word_char(c):
     """Returns True if c is [a-zA-Z0-9_]."""
@@ -79,7 +81,7 @@ def _compile_regex(pattern, start_group_id = 0):
     dot_all = False
 
     # Always save group 0 (full match) start
-    instructions.append((4, 0, None, None))
+    instructions.append((OP_SAVE, 0, None, None))
 
     pattern_len = len(pattern)
 
@@ -92,15 +94,15 @@ def _compile_regex(pattern, start_group_id = 0):
 
         if char == "^":
             if multiline:
-                instructions.append((12, None, None, None))
+                instructions.append((OP_ANCHOR_LINE_START, None, None, None))
             else:
-                instructions.append((7, None, None, None))
+                instructions.append((OP_ANCHOR_START, None, None, None))
 
         elif char == "$":
             if multiline:
-                instructions.append((13, None, None, None))
+                instructions.append((OP_ANCHOR_LINE_END, None, None, None))
             else:
-                instructions.append((8, None, None, None))
+                instructions.append((OP_ANCHOR_END, None, None, None))
 
         elif char == "[":
             i += 1
@@ -178,7 +180,7 @@ def _compile_regex(pattern, start_group_id = 0):
                         char_set.append(pattern[i])
                     i += 1
 
-            instructions.append((6, (char_set, is_negated), None, None))
+            instructions.append((OP_SET, (char_set, is_negated), None, None))
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "(":
@@ -198,7 +200,7 @@ def _compile_regex(pattern, start_group_id = 0):
 
                     # Iterative compilation:
                     # Emit LOOKAHEAD_START placeholder
-                    instructions.append((15, (None, is_negative), None, None))
+                    instructions.append((OP_LOOKAHEAD, (None, is_negative), None, None))
                     start_pc = len(instructions) - 1
 
                     stack.append({
@@ -220,7 +222,7 @@ def _compile_regex(pattern, start_group_id = 0):
                             is_negative = (lb == "!")
 
                             # Emit LOOKBEHIND placeholder
-                            instructions.append((17, (None, is_negative), None, None))
+                            instructions.append((OP_LOOKBEHIND, (None, is_negative), None, None))
                             start_pc = len(instructions) - 1
 
                             stack.append({
@@ -264,7 +266,7 @@ def _compile_regex(pattern, start_group_id = 0):
                             ref_name = pattern[start_name:end_name]
                             if ref_name in named_groups:
                                 gid = named_groups[ref_name]
-                                instructions.append((14, (gid, case_insensitive), None, None))
+                                instructions.append((OP_BACKREF, (gid, case_insensitive), None, None))
                                 i = end_name  # Skip past )
                                 is_group_start = False  # It's an atom, not a group start
                             else:
@@ -314,7 +316,7 @@ def _compile_regex(pattern, start_group_id = 0):
                 if is_capturing:
                     group_count += 1
                     gid = group_count
-                    instructions.append((4, gid * 2, None, None))
+                    instructions.append((OP_SAVE, gid * 2, None, None))
                     if group_name:
                         named_groups[group_name] = gid
 
@@ -333,15 +335,15 @@ def _compile_regex(pattern, start_group_id = 0):
                 if top["type"] == "group":
                     if len(top["branch_starts"]) > 1:
                         top["exit_jumps"].append(len(instructions))
-                        instructions.append((3, None, -1, None))
+                        instructions.append((OP_JUMP, None, -1, None))
                         _build_alt_tree(instructions, top)
 
                     for jump_idx in top["exit_jumps"]:
-                        instructions[jump_idx] = (3, None, len(instructions), None)
+                        instructions[jump_idx] = (OP_JUMP, None, len(instructions), None)
 
                     # Only emit SAVE if it was a capturing group
                     if top["is_capturing"]:
-                        instructions.append((4, top["gid"] * 2 + 1, None, None))
+                        instructions.append((OP_SAVE, top["gid"] * 2 + 1, None, None))
 
                     start_pc_fix = top["start_pc"]
                     i = _handle_quantifier(pattern, i, instructions, atom_start = start_pc_fix)
@@ -349,7 +351,7 @@ def _compile_regex(pattern, start_group_id = 0):
                 elif top["type"] == "lookahead":
                     # End of lookahead block
                     # Emit LOOKAHEAD_END
-                    instructions.append((16, None, None, None))
+                    instructions.append((OP_LOOKAHEAD_END, None, None, None))
 
                     # Fix up LOOKAHEAD_START to jump over the block
                     # LOOKAHEAD_START is at top["start_pc"]
@@ -357,7 +359,7 @@ def _compile_regex(pattern, start_group_id = 0):
                     start_pc = top["start_pc"]
                     is_negative = top["is_negative"]
                     jump_target = len(instructions)
-                    instructions[start_pc] = (15, (jump_target, is_negative), None, None)
+                    instructions[start_pc] = (OP_LOOKAHEAD, (jump_target, is_negative), None, None)
 
                     # Lookahead assertions are zero-width, so they don't quantify normally?
                     # But they can be quantified? e.g. (?=a)+
@@ -368,14 +370,14 @@ def _compile_regex(pattern, start_group_id = 0):
                 elif top["type"] == "lookbehind":
                     # End of lookbehind block
                     # Append ANCHOR_END (8) and MATCH (5) to ensure it matches at the end of substring
-                    instructions.append((8, None, None, None))
-                    instructions.append((5, None, None, None))
+                    instructions.append((OP_ANCHOR_END, None, None, None))
+                    instructions.append((OP_MATCH, None, None, None))
 
                     # Fix up LOOKBEHIND start
                     start_pc = top["start_pc"]
                     is_negative = top["is_negative"]
                     jump_target = len(instructions)
-                    instructions[start_pc] = (17, (jump_target, is_negative), None, None)
+                    instructions[start_pc] = (OP_LOOKBEHIND, (jump_target, is_negative), None, None)
 
                     i = _handle_quantifier(pattern, i, instructions, atom_start = start_pc)
 
@@ -386,13 +388,13 @@ def _compile_regex(pattern, start_group_id = 0):
                 instructions.append((3, None, -1, None))
                 group_ctx["branch_starts"].append(len(instructions))
             else:
-                instructions.append((0, char, None, None))
+                instructions.append((OP_CHAR, char, None, None))
 
         elif char == ".":
             if dot_all:
-                instructions.append((1, None, None, None))  # ANY (includes \n)
+                instructions.append((OP_ANY, None, None, None))  # ANY (includes \n)
             else:
-                instructions.append((11, None, None, None))  # ANY_NO_NL (excludes \n)
+                instructions.append((OP_ANY_NO_NL, None, None, None))  # ANY_NO_NL (excludes \n)
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "\\":
@@ -404,15 +406,15 @@ def _compile_regex(pattern, start_group_id = 0):
                 predef = _get_predefined_class(next_c)
                 if predef:
                     # predef is (list, is_negated)
-                    instructions.append((6, predef, None, None))
+                    instructions.append((OP_SET, predef, None, None))
                 elif next_c == "b":
-                    instructions.append((9, None, None, None))
+                    instructions.append((OP_WORD_BOUNDARY, None, None, None))
                 elif next_c == "B":
-                    instructions.append((10, None, None, None))
+                    instructions.append((OP_NOT_WORD_BOUNDARY, None, None, None))
                 elif next_c >= "1" and next_c <= "9":
                     # Backreference \1 .. \9
                     gid = int(next_c)
-                    instructions.append((14, (gid, case_insensitive), None, None))
+                    instructions.append((OP_BACKREF, (gid, case_insensitive), None, None))
                 else:
                     # Handle standard escapes
                     literal_char = None
@@ -444,15 +446,15 @@ def _compile_regex(pattern, start_group_id = 0):
                             literal_char = "x"  # Fallback
 
                     if literal_char:
-                        instructions.append((0, literal_char, None, None))
+                        instructions.append((OP_CHAR, literal_char, None, None))
                     elif case_insensitive:
                         variants = _get_case_variants(next_c)
                         if len(variants) > 1:
-                            instructions.append((6, (variants, False), None, None))
+                            instructions.append((OP_SET, (variants, False), None, None))
                         else:
-                            instructions.append((0, next_c, None, None))
+                            instructions.append((OP_CHAR, next_c, None, None))
                     else:
-                        instructions.append((0, next_c, None, None))
+                        instructions.append((OP_CHAR, next_c, None, None))
                 i = _handle_quantifier(pattern, i, instructions)
 
         else:
@@ -461,16 +463,16 @@ def _compile_regex(pattern, start_group_id = 0):
                 if len(variants) > 1:
                     instructions.append((6, (variants, False), None, None))
                 else:
-                    instructions.append((0, char, None, None))
+                    instructions.append((OP_CHAR, char, None, None))
             else:
-                instructions.append((0, char, None, None))
+                instructions.append((OP_CHAR, char, None, None))
             i = _handle_quantifier(pattern, i, instructions)
 
         i += 1
 
     # Save group 0 end and match
-    instructions.append((4, 1, None, None))
-    instructions.append((5, None, None, None))
+    instructions.append((OP_SAVE, 1, None, None))
+    instructions.append((OP_MATCH, None, None, None))
 
     return instructions, named_groups, group_count
 
@@ -480,7 +482,7 @@ def _build_alt_tree(instructions, group_ctx):
     orig_inst = instructions[entry_pc]
     relocated_pc = len(instructions)
     instructions.append(orig_inst)
-    instructions.append((3, None, entry_pc + 1, None))
+    instructions.append((OP_JUMP, None, entry_pc + 1, None))
 
     tree_start_pc = len(instructions)
     current_branches = list(branches)
@@ -489,11 +491,11 @@ def _build_alt_tree(instructions, group_ctx):
     for j in range(len(current_branches) - 1):
         if j < len(current_branches) - 2:
             next_split = len(instructions) + 1
-            instructions.append((2, None, current_branches[j], next_split))
+            instructions.append((OP_SPLIT, None, current_branches[j], next_split))
         else:
-            instructions.append((2, None, current_branches[j], current_branches[-1]))
+            instructions.append((OP_SPLIT, None, current_branches[j], current_branches[-1]))
 
-    instructions[entry_pc] = (3, None, tree_start_pc, None)
+    instructions[entry_pc] = (OP_JUMP, None, tree_start_pc, None)
 
 def _copy_insts(insts, atom_start, new_start):
     """Copies instructions from atom_start to end, shifting jumps."""
@@ -516,20 +518,20 @@ def _copy_insts(insts, atom_start, new_start):
 def _apply_question_mark(insts, atom_start, lazy = False):
     """Applies ? logic. Lazy=True tries skipping first."""
     jump_to_end_idx = len(insts)
-    insts.append((3, None, -1, None))
+    insts.append((OP_JUMP, None, -1, None))
     orig_first = insts[atom_start]
     reloc_idx = len(insts)
     insts.append(orig_first)
     if atom_start + 1 < jump_to_end_idx:
-        insts.append((3, None, atom_start + 1, None))
+        insts.append((OP_JUMP, None, atom_start + 1, None))
     skip_target = len(insts)
 
     # Greedy: Try reloc (match) then skip. Lazy: Try skip then reloc.
     if lazy:
-        insts[atom_start] = (2, None, skip_target, reloc_idx)
+        insts[atom_start] = (OP_SPLIT, None, skip_target, reloc_idx)
     else:
-        insts[atom_start] = (2, None, reloc_idx, skip_target)
-    insts[jump_to_end_idx] = (3, None, skip_target, None)
+        insts[atom_start] = (OP_SPLIT, None, reloc_idx, skip_target)
+    insts[jump_to_end_idx] = (OP_JUMP, None, skip_target, None)
 
 def _apply_star(insts, atom_start, lazy = False):
     """Applies * logic. Lazy=True tries skipping first."""
@@ -538,14 +540,14 @@ def _apply_star(insts, atom_start, lazy = False):
     insts.append(orig_first)
     if len(insts) - 1 > atom_start + 1:
         insts.append((3, None, atom_start + 1, None))
-    insts.append((3, None, atom_start, None))
+    insts.append((OP_JUMP, None, atom_start, None))
     skip_target = len(insts)
 
     # Greedy: Try reloc (loop) then skip. Lazy: Try skip then reloc.
     if lazy:
-        insts[atom_start] = (2, None, skip_target, reloc_idx)
+        insts[atom_start] = (OP_SPLIT, None, skip_target, reloc_idx)
     else:
-        insts[atom_start] = (2, None, reloc_idx, skip_target)
+        insts[atom_start] = (OP_SPLIT, None, reloc_idx, skip_target)
 
 def _apply_plus(insts, atom_start, lazy = False):
     """Applies + logic. Lazy=True tries exit first."""
@@ -554,9 +556,9 @@ def _apply_plus(insts, atom_start, lazy = False):
     # Lazy: atom -> SPLIT(next, atom_start)
     next_pc = len(insts) + 1
     if lazy:
-        insts.append((2, None, next_pc, atom_start))
+        insts.append((OP_SPLIT, None, next_pc, atom_start))
     else:
-        insts.append((2, None, atom_start, next_pc))
+        insts.append((OP_SPLIT, None, atom_start, next_pc))
 
 def _handle_quantifier(pattern, i, insts, atom_start = -1):
     if atom_start == -1:
@@ -696,22 +698,22 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
         inst = instructions[pc]
         itype = inst[0]
 
-        if itype == 2:  # SPLIT
+        if itype == OP_SPLIT:
             stack.append((inst[3], list(regs)))
             stack.append((inst[2], list(regs)))
-        elif itype == 3:  # JUMP
+        elif itype == OP_JUMP:
             stack.append((inst[2], list(regs)))
-        elif itype == 4:  # SAVE
+        elif itype == OP_SAVE:
             new_regs = list(regs)
             new_regs[inst[1]] = current_idx
             stack.append((pc + 1, new_regs))
-        elif itype == 7:  # ANCHOR_START
+        elif itype == OP_ANCHOR_START:
             if current_idx == 0:
                 stack.append((pc + 1, list(regs)))
-        elif itype == 8:  # ANCHOR_END
+        elif itype == OP_ANCHOR_END:
             if current_idx == input_len:
                 stack.append((pc + 1, list(regs)))
-        elif itype == 9:  # WORD_BOUNDARY
+        elif itype == OP_WORD_BOUNDARY:
             is_prev_word = False
             if current_idx > 0:
                 is_prev_word = _is_word_char(input_str[current_idx - 1])
@@ -720,7 +722,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 is_curr_word = _is_word_char(input_str[current_idx])
             if is_prev_word != is_curr_word:
                 stack.append((pc + 1, list(regs)))
-        elif itype == 10:  # NOT_WORD_BOUNDARY
+        elif itype == OP_NOT_WORD_BOUNDARY:
             is_prev_word = False
             if current_idx > 0:
                 is_prev_word = _is_word_char(input_str[current_idx - 1])
@@ -729,7 +731,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 is_curr_word = _is_word_char(input_str[current_idx])
             if is_prev_word == is_curr_word:
                 stack.append((pc + 1, list(regs)))
-        elif itype == 12:  # ANCHOR_LINE_START
+        elif itype == OP_ANCHOR_LINE_START:
             matched = False
             if current_idx == 0:
                 matched = True
@@ -737,7 +739,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 matched = True
             if matched:
                 stack.append((pc + 1, list(regs)))
-        elif itype == 13:  # ANCHOR_LINE_END
+        elif itype == OP_ANCHOR_LINE_END:
             matched = False
             if current_idx == input_len:
                 matched = True
@@ -751,13 +753,13 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
 def _check_simple_match(inst, char):
     itype = inst[0]
-    if itype == 0:  # CHAR
+    if itype == OP_CHAR:
         return inst[1] == char
-    elif itype == 1:  # ANY
+    elif itype == OP_ANY:
         return True
-    elif itype == 11:  # ANY_NO_NL
+    elif itype == OP_ANY_NO_NL:
         return char != "\n"
-    elif itype == 6:  # SET
+    elif itype == OP_SET:
         char_set_data, is_negated = inst[1]
         in_set = False
         for item in char_set_data:
@@ -816,19 +818,19 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
         inst = instructions[pc]
         itype = inst[0]
 
-        if itype == 5:  # MATCH
+        if itype == OP_MATCH:
             if match_regs == None:
                 match_regs = regs
             break
-        elif itype == 15:  # LOOKAHEAD
+        elif itype == OP_LOOKAHEAD:
             jump_target, is_negative = inst[1]
             lookarounds.append((pc, regs, jump_target, is_negative, False))
             continue
-        elif itype == 17:  # LOOKBEHIND
+        elif itype == OP_LOOKBEHIND:
             jump_target, is_negative = inst[1]
             lookarounds.append((pc, regs, jump_target, is_negative, True))
             continue
-        elif itype == 16:  # LOOKAHEAD_END
+        elif itype == OP_LOOKAHEAD_END:
             if match_regs == None:
                 match_regs = regs
             break
@@ -837,9 +839,9 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
             continue
 
         match_found = False
-        if itype in [0, 1, 11, 6]:
+        if itype in [OP_CHAR, OP_ANY, OP_ANY_NO_NL, OP_SET]:
             match_found = _check_simple_match(inst, char)
-        elif itype == 14:  # BACKREF
+        elif itype == OP_BACKREF:
             matched, cap_len = _check_backref(inst, regs, input_str, char_idx, input_len)
             if matched:
                 target_idx = char_idx + cap_len
@@ -913,7 +915,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
                 # Check for completion conditions
                 if not frame["threads"] and not frame["waiting_threads"]:
                     is_anchored = False
-                    if len(frame["instructions"]) > 1 and frame["instructions"][1][0] == 7:
+                    if len(frame["instructions"]) > 1 and frame["instructions"][1][0] == OP_ANCHOR_START:
                         is_anchored = True
 
                     if len(stack) == 1 and not is_anchored and frame["char_idx"] < len(frame["input_str"]):
@@ -943,7 +945,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
                 # Unanchored Search Injection (Root Frame Only)
                 if len(stack) == 1:
                     is_anchored = False
-                    if len(frame["instructions"]) > 1 and frame["instructions"][1][0] == 7:
+                    if len(frame["instructions"]) > 1 and frame["instructions"][1][0] == OP_ANCHOR_START:
                         is_anchored = True
 
                     if not is_anchored and char_idx <= input_len_frame and frame["match_regs"] == None:
