@@ -67,6 +67,8 @@ OP_NOT_WORD_BOUNDARY = 10  # Match if no word/non-word transition
 OP_ANY_NO_NL = 11  # Match any character EXCEPT \n
 OP_ANCHOR_LINE_START = 12  # Match start or after \n
 OP_ANCHOR_LINE_END = 13  # Match end or before \n
+OP_CHAR_I = 14  # Match character case-insensitively
+OP_SET_I = 15  # Match set case-insensitively
 
 def _is_word_char(c):
     """Returns True if c is [a-zA-Z0-9_]."""
@@ -89,16 +91,6 @@ def _get_predefined_class(char):
     elif char == "S":
         return ([" ", "\t", "\n", "\r", "\f", "\v"], True)
     return None
-
-def _get_case_variants(char):
-    """Returns list of [lower, upper] if applicable, else [char]."""
-    if char >= "a" and char <= "z":
-        upper = char.upper()
-        return [char, upper]
-    if char >= "A" and char <= "Z":
-        lower = char.lower()
-        return [lower, char]
-    return [char]
 
 def _parse_escape(pattern, i, pattern_len):
     """Parses an escape sequence at i. Returns (char, last_consumed_i)."""
@@ -221,31 +213,30 @@ def _compile_regex(pattern, start_group_id = 0):
                         if len(end_chars) == 1 and type(end_chars[0]) == "string":
                             start_c = chars[0]
                             end_c = end_chars[0]
-                            char_set.append((start_c, end_c))
 
                             if case_insensitive:
-                                if start_c >= "a" and start_c <= "z" and end_c >= "a" and end_c <= "z":
-                                    char_set.append((start_c.upper(), end_c.upper()))
-                                elif start_c >= "A" and start_c <= "Z" and end_c >= "A" and end_c <= "Z":
-                                    char_set.append((start_c.lower(), end_c.lower()))
+                                start_c = start_c.lower()
+                                end_c = end_c.lower()
 
+                            char_set.append((start_c, end_c))
                             i = end_i
                             is_range = True
 
                 if not is_range:
                     if case_insensitive:
-                        expanded = []
                         for c in chars:
                             if type(c) == "string":
-                                expanded.extend(_get_case_variants(c))
+                                char_set.append(c.lower())
                             else:
-                                expanded.append(c)
-                        char_set.extend(expanded)
+                                char_set.append(c)
                     else:
                         char_set.extend(chars)
                     i = new_i
 
-            instructions.append((OP_SET, (char_set, is_negated), None, None))
+            if case_insensitive:
+                instructions.append((OP_SET_I, (char_set, is_negated), None, None))
+            else:
+                instructions.append((OP_SET, (char_set, is_negated), None, None))
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "(":
@@ -390,22 +381,16 @@ def _compile_regex(pattern, start_group_id = 0):
                     i = new_i
 
                     if case_insensitive:
-                        variants = _get_case_variants(char)
-                        if len(variants) > 1:
-                            instructions.append((OP_SET, (variants, False), None, None))
-                        else:
-                            instructions.append((OP_CHAR, char, None, None))
+                        if char:
+                            char = char.lower()
+                        instructions.append((OP_CHAR_I, char, None, None))
                     else:
                         instructions.append((OP_CHAR, char, None, None))
                 i = _handle_quantifier(pattern, i, instructions)
 
         else:
             if case_insensitive:
-                variants = _get_case_variants(char)
-                if len(variants) > 1:
-                    instructions.append((6, (variants, False), None, None))
-                else:
-                    instructions.append((OP_CHAR, char, None, None))
+                instructions.append((OP_CHAR_I, char.lower(), None, None))
             else:
                 instructions.append((OP_CHAR, char, None, None))
             i = _handle_quantifier(pattern, i, instructions)
@@ -697,10 +682,12 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
     return reachable
 
-def _check_simple_match(inst, char):
+def _check_simple_match(inst, char, char_lower):
     itype = inst[0]
     if itype == OP_CHAR:
         return inst[1] == char
+    elif itype == OP_CHAR_I:
+        return inst[1] == char_lower
     elif itype == OP_ANY:
         return True
     elif itype == OP_ANY_NO_NL:
@@ -717,9 +704,21 @@ def _check_simple_match(inst, char):
                 in_set = True
                 break
         return (in_set != is_negated)
+    elif itype == OP_SET_I:
+        char_set_data, is_negated = inst[1]
+        in_set = False
+        for item in char_set_data:
+            if type(item) == "tuple":
+                if char_lower >= item[0] and char_lower <= item[1]:
+                    in_set = True
+                    break
+            elif char_lower == item:
+                in_set = True
+                break
+        return (in_set != is_negated)
     return False
 
-def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
+def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, input_len):
     next_threads = []
     match_regs = None
 
@@ -736,8 +735,8 @@ def _process_batch(instructions, batch, char, char_idx, input_str, input_len):
             continue
 
         match_found = False
-        if itype in [OP_CHAR, OP_ANY, OP_ANY_NO_NL, OP_SET]:
-            match_found = _check_simple_match(inst, char)
+        if itype in [OP_CHAR, OP_ANY, OP_ANY_NO_NL, OP_SET, OP_CHAR_I, OP_SET_I]:
+            match_found = _check_simple_match(inst, char, char_lower)
 
         if match_found:
             closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs, char_idx + 1)
@@ -750,6 +749,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
         initial_regs = [-1] * num_regs
 
     input_len = len(input_str)
+    input_lower = input_str.lower()
 
     # Current active threads: list of (pc, regs)
     current_threads = _get_epsilon_closure(
@@ -767,6 +767,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
     # We go up to input_len inclusive to handle matches at the very end (like $)
     for char_idx in range(start_index, input_len + 1):
         char = input_str[char_idx] if char_idx < input_len else None
+        char_lower = input_lower[char_idx] if char_idx < input_len else None
 
         # Unanchored Search Injection
         if not anchored and char_idx <= input_len:
@@ -779,6 +780,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
             instructions,
             current_threads,
             char,
+            char_lower,
             char_idx,
             input_str,
             input_len,
