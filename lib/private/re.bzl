@@ -1,14 +1,29 @@
-"""
-A simple Regex Engine implemented in Starlark.
-Supports: Literals, ., *, +, ?, |, (), [], ^, $.
-Extended Support: Non-capturing groups (?:...), Shortcuts \\d, \\w, \\s.
-Repetition: {n}, {n,}, {n,m}.
-Quantifiers: Greedy (*, +) and Lazy (*?, +?).
-Named Groups: (?P<name>...).
-Boundaries: \\b, \\B.
-Flags: (?i) Case Insensitive, (?m) Multiline, (?s) Dot-All.
-Edge Cases: Negated sets [^abc], escaped characters in sets, and literal escaping.
-Designed for environments without 're' module, recursion, or 'while' loops.
+"""A Thompson NFA-based Regex Engine implemented in Starlark.
+
+Supports a significant subset of RE2 syntax:
+- Single-character: Literals, ., \d, \D, \s, \S, \w, \W, [[:class:]]
+- Composites: xy, x|y
+- Repetitions: x*, x+, x?, x{n,m}, x{n,}, x{n} (Greedy and Lazy)
+- Grouping: (re), (?P<name>re), (?:re), (?flags), (?flags:re)
+- Anchors: ^, $, \A, \z, \b, \B
+- Flags: i (case-insensitive), m (multi-line), s (dot-all), U (ungreedy)
+- Escapes: \n, \r, \t, \f, \v, \a, \xHH, \x{h...h}, \OOO, \Q...\E
+
+API Functions:
+- compile(pattern): Compiles a regex pattern into a reusable object.
+- search(pattern, text): Scan through string looking for the first match.
+- match(pattern, text): Try to apply the pattern at the start of the string.
+- fullmatch(pattern, text): Try to apply the pattern to the entire string.
+- findall(pattern, text): Return all non-overlapping matches.
+- sub(pattern, repl, text, count=0): Replace occurrences of the pattern.
+- split(pattern, text, maxsplit=0): Split string by the occurrences of the pattern.
+
+Match Object Properties:
+- group(n): Returns one or more subgroups of the match.
+- groups(default=None): Returns a tuple containing all the subgroups of the match.
+- span(n): Returns a 2-tuple containing the (start, end) indices of the subgroup.
+- lastindex: The integer index of the last matched capturing group.
+- lastgroup: The name of the last matched capturing group.
 """
 
 MAX_GROUP_NAME_LEN = 32
@@ -828,7 +843,12 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             stack.append((inst[2], list(regs)))
         elif itype == OP_SAVE:
             new_regs = list(regs)
-            new_regs[inst[1]] = current_idx
+            reg_idx = inst[1]
+            new_regs[reg_idx] = current_idx
+
+            # If it's a group end (odd index) and not group 0, track it as lastindex
+            if reg_idx > 1 and reg_idx % 2 == 1:
+                new_regs[-1] = reg_idx // 2
             stack.append((pc + 1, new_regs))
         elif itype == OP_ANCHOR_START:
             if current_idx == 0:
@@ -967,7 +987,7 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
 
 def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
     if initial_regs == None:
-        initial_regs = [-1] * num_regs
+        initial_regs = [-1] * (num_regs + 1)  # +1 for lastindex
 
     input_len = len(input_str)
     input_lower = input_str.lower()
@@ -1078,39 +1098,56 @@ def _expand_replacement(repl, match_str, groups, named_groups = {}):
         res += c
     return res
 
-def _extract_results(text, regs, named_groups):
-    results = {}
-    for i in range(0, len(regs), 2):
-        start = regs[i]
-        end = regs[i + 1]
-        if start != -1 and end != -1:
-            results[i // 2] = text[start:end]
+def _search_regs(bytecode, text, group_count, start_index = 0):
+    num_regs = (group_count + 1) * 2
+    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = False)
 
-    for name, gid in named_groups.items():
-        if gid in results:
-            results[name] = results[gid]
+def _match_regs(bytecode, text, group_count, start_index = 0):
+    num_regs = (group_count + 1) * 2
+    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = True)
 
-    return results
+def _fullmatch_regs(bytecode, text, group_count, start_index = 0):
+    num_regs = (group_count + 1) * 2
+    regs = _execute(bytecode, text, num_regs, start_index = start_index, anchored = True)
+    if regs and regs[1] != len(text):
+        return None
+    return regs
 
 def _search_bytecode(bytecode, text, named_groups, group_count):
-    num_regs = (group_count + 1) * 2
-    regs = _execute(bytecode, text, num_regs, anchored = False)
+    regs = _search_regs(bytecode, text, group_count)
     if not regs:
         return None
-    return _extract_results(text, regs, named_groups)
+    compiled = struct(
+        bytecode = bytecode,
+        named_groups = named_groups,
+        group_count = group_count,
+        pattern = None,
+    )
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def _match_bytecode(bytecode, text, named_groups, group_count):
-    num_regs = (group_count + 1) * 2
-    regs = _execute(bytecode, text, num_regs, anchored = True)
+    regs = _match_regs(bytecode, text, group_count)
     if not regs:
         return None
-    return _extract_results(text, regs, named_groups)
+    compiled = struct(
+        bytecode = bytecode,
+        named_groups = named_groups,
+        group_count = group_count,
+        pattern = None,
+    )
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def _fullmatch_bytecode(bytecode, text, named_groups, group_count):
-    res = _match_bytecode(bytecode, text, named_groups, group_count)
-    if res and len(res[0]) == len(text):
-        return res
-    return None
+    regs = _fullmatch_regs(bytecode, text, group_count)
+    if not regs:
+        return None
+    compiled = struct(
+        bytecode = bytecode,
+        named_groups = named_groups,
+        group_count = group_count,
+        pattern = None,
+    )
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def compile(pattern):
     """Compiles a regex pattern into a reusable object.
@@ -1155,13 +1192,24 @@ def search(pattern, text):
     """
     if type(pattern) == "string":
         bytecode, named_groups, group_count = _compile_regex(pattern)
+        compiled = struct(
+            bytecode = bytecode,
+            named_groups = named_groups,
+            group_count = group_count,
+            pattern = pattern,
+        )
     else:
         # Assume it's a compiled regex object (struct)
+        compiled = pattern
         bytecode = pattern.bytecode
         named_groups = pattern.named_groups
         group_count = pattern.group_count
 
-    return _search_bytecode(bytecode, text, named_groups, group_count)
+    regs = _search_regs(bytecode, text, group_count)
+    if not regs:
+        return None
+
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def match(pattern, text):
     """Try to apply the pattern at the start of the string.
@@ -1176,13 +1224,24 @@ def match(pattern, text):
     """
     if type(pattern) == "string":
         bytecode, named_groups, group_count = _compile_regex(pattern)
+        compiled = struct(
+            bytecode = bytecode,
+            named_groups = named_groups,
+            group_count = group_count,
+            pattern = pattern,
+        )
     else:
         # Assume it's a compiled regex object (struct)
+        compiled = pattern
         bytecode = pattern.bytecode
         named_groups = pattern.named_groups
         group_count = pattern.group_count
 
-    return _match_bytecode(bytecode, text, named_groups, group_count)
+    regs = _match_regs(bytecode, text, group_count)
+    if not regs:
+        return None
+
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def fullmatch(pattern, text):
     """Try to apply the pattern to the entire string.
@@ -1197,13 +1256,24 @@ def fullmatch(pattern, text):
     """
     if type(pattern) == "string":
         bytecode, named_groups, group_count = _compile_regex(pattern)
+        compiled = struct(
+            bytecode = bytecode,
+            named_groups = named_groups,
+            group_count = group_count,
+            pattern = pattern,
+        )
     else:
         # Assume it's a compiled regex object (struct)
+        compiled = pattern
         bytecode = pattern.bytecode
         named_groups = pattern.named_groups
         group_count = pattern.group_count
 
-    return _fullmatch_bytecode(bytecode, text, named_groups, group_count)
+    regs = _fullmatch_regs(bytecode, text, group_count)
+    if not regs:
+        return None
+
+    return _MatchObject(text, regs, compiled, 0, len(text))
 
 def findall(pattern, text):
     """Return all non-overlapping matches of pattern in string, as a list of strings.
@@ -1282,7 +1352,13 @@ def _MatchObject(text, regs, compiled, pos, endpos):
     """
 
     def group(n = 0):
-        if n < 0 or n > compiled["group_count"]:
+        if type(n) == "string":
+            if n in compiled.named_groups:
+                n = compiled.named_groups[n]
+            else:
+                fail("IndexError: no such group")
+
+        if n < 0 or n > compiled.group_count:
             fail("IndexError: no such group")
         start = regs[n * 2]
         end = regs[n * 2 + 1]
@@ -1292,7 +1368,7 @@ def _MatchObject(text, regs, compiled, pos, endpos):
 
     def groups(default = None):
         res = []
-        for i in range(1, compiled["group_count"] + 1):
+        for i in range(1, compiled.group_count + 1):
             start = regs[i * 2]
             end = regs[i * 2 + 1]
             if start == -1 or end == -1:
@@ -1302,9 +1378,26 @@ def _MatchObject(text, regs, compiled, pos, endpos):
         return tuple(res)
 
     def span(n = 0):
-        if n < 0 or n > compiled["group_count"]:
+        if type(n) == "string":
+            if n in compiled.named_groups:
+                n = compiled.named_groups[n]
+            else:
+                fail("IndexError: no such group")
+
+        if n < 0 or n > compiled.group_count:
             fail("IndexError: no such group")
         return (regs[n * 2], regs[n * 2 + 1])
+
+    lastindex = regs[-1]
+    if lastindex == -1:
+        lastindex = None
+
+    lastgroup = None
+    if lastindex != None:
+        for name, gid in compiled.named_groups.items():
+            if gid == lastindex:
+                lastgroup = name
+                break
 
     return struct(
         group = group,
@@ -1314,8 +1407,8 @@ def _MatchObject(text, regs, compiled, pos, endpos):
         re = compiled,
         pos = pos,
         endpos = endpos,
-        lastindex = None,  # TODO: Track last capturing group
-        lastgroup = None,  # TODO: Track last capturing group name
+        lastindex = lastindex,
+        lastgroup = lastgroup,
     )
 
 def sub(pattern, repl, text, count = 0):

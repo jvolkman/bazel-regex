@@ -17,9 +17,8 @@ def _regex_test_impl(ctx):
             asserts.true(env, False, "Pattern: '%s', Text: '%s' expected match, got None" % (pattern, text))
         else:
             for k, v in expected.items():
-                asserts.true(env, k in res, "Pattern: '%s', Text: '%s' missing group %s" % (pattern, text, k))
-                if k in res:
-                    asserts.equals(env, v, res[k], "Pattern: '%s', Text: '%s' group %s mismatch" % (pattern, text, k))
+                val = res.group(k)
+                asserts.equals(env, v, val, "Pattern: '%s', Text: '%s' group %s mismatch" % (pattern, text, k))
 
     return unittest.end(env)
 
@@ -48,8 +47,8 @@ def assert_match(env, pattern, text, expected_match):
         asserts.equals(env, None, res, "Pattern: '%s', Text: '%s' expected None" % (pattern, text))
     elif res == None:
         asserts.true(env, False, "Pattern: '%s', Text: '%s' expected match, got None" % (pattern, text))
-    elif res[0] != expected_match:
-        asserts.equals(env, expected_match, res[0], "Pattern: '%s', Text: '%s' mismatch" % (pattern, text))
+    elif res.group(0) != expected_match:
+        asserts.equals(env, expected_match, res.group(0), "Pattern: '%s', Text: '%s' mismatch" % (pattern, text))
 
 def assert_eq(env, actual, expected, msg):
     """Asserts that two values are equal.
@@ -78,6 +77,5 @@ def run_suite(env, name, cases):
             asserts.true(env, False, "Pattern: '%s', Text: '%s' expected match, got None" % (pattern, text))
         else:
             for k, v in expected.items():
-                asserts.true(env, k in res, "Pattern: '%s', Text: '%s' missing group %s" % (pattern, text, k))
-                if k in res:
-                    asserts.equals(env, v, res[k], "Pattern: '%s', Text: '%s' group %s mismatch" % (pattern, text, k))
+                val = res.group(k)
+                asserts.equals(env, v, val, "Pattern: '%s', Text: '%s' group %s mismatch" % (pattern, text, k))

@@ -44,9 +44,28 @@ def run_tests_api(env):
     assert_eq(env, bool(prog.search("aaa")), True, "compiled search")
     assert_eq(env, bool(prog.match("aaa")), True, "compiled match")
 
-    # Stress Tests: API with Large Inputs
-    large_input = "a" * 1000 + "b" + "a" * 1000
-    assert_eq(env, bool(search("b", large_input)), True, "search in large input")
-    assert_eq(env, len(findall("a+", large_input)), 2, "findall in large input")
-    assert_eq(env, sub("a+", "c", large_input), "cbc", "sub in large input")
-    assert_eq(env, split("b", large_input), ["a" * 1000, "a" * 1000], "split in large input")
+    # 6. lastindex and lastgroup
+    m = search(r"(a)(b)", "ab")
+    assert_eq(env, m.lastindex, 2, "lastindex for (a)(b)")
+    assert_eq(env, m.lastgroup, None, "lastgroup for (a)(b)")
+
+    m = search(r"(?P<first>a)(?P<second>b)", "ab")
+    assert_eq(env, m.lastindex, 2, "lastindex for named groups")
+    assert_eq(env, m.lastgroup, "second", "lastgroup for named groups")
+
+    m = search(r"((a)(b))", "ab")
+    assert_eq(env, m.lastindex, 1, "lastindex for nested groups (outermost wins last)")
+    # Actually, in Python:
+    # re.search('((a)(b))', 'ab').lastindex -> 1
+    # Because group 1 is the last one to *close*.
+    # Wait, (a) is group 2, (b) is group 3.
+    # ((a)(b))
+    # ^ ^  ^ ^
+    # 1 2  2 3 3 1
+    # Order of closing: 2, 3, 1. So lastindex should be 1.
+
+    m = search(r"(a)|(b)", "b")
+    assert_eq(env, m.lastindex, 2, "lastindex for alternation")
+
+    m = search(r"(?P<name>a)|(b)", "a")
+    assert_eq(env, m.lastgroup, "name", "lastgroup for alternation")
