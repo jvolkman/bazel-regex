@@ -13,7 +13,11 @@ def _test_core_impl(ctx):
 core_test = unittest.make(_test_core_impl)
 
 def run_tests_core(env):
-    """Runs core tests."""
+    """Runs core tests.
+
+    Args:
+      env: The test environment.
+    """
     cases = [
         # 4. Core functionality
         ("(orange)-(.*)", "orange-rules", {0: "orange-rules", 1: "orange", 2: "rules"}),

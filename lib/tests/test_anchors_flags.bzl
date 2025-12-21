@@ -13,7 +13,11 @@ def _test_anchors_flags_impl(ctx):
 anchors_flags_test = unittest.make(_test_anchors_flags_impl)
 
 def run_tests_anchors_flags(env):
-    """Runs anchors and flags tests."""
+    """Runs anchors and flags tests.
+
+    Args:
+      env: The test environment.
+    """
     cases = [
         # 10. Anchors
         ("^orange$", "orange", {0: "orange"}),

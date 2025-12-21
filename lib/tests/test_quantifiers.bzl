@@ -13,7 +13,11 @@ def _test_quantifiers_impl(ctx):
 quantifiers_test = unittest.make(_test_quantifiers_impl)
 
 def run_tests_quantifiers(env):
-    """Runs quantifier tests."""
+    """Runs quantifier tests.
+
+    Args:
+      env: The test environment.
+    """
     cases = [
         # 2. Lazy vs Greedy in Context
         ("<.*?>", "<tag>content</tag>", {0: "<tag>"}),

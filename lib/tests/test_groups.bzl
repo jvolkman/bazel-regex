@@ -13,7 +13,11 @@ def _test_groups_impl(ctx):
 groups_test = unittest.make(_test_groups_impl)
 
 def run_tests_groups(env):
-    """Runs group tests."""
+    """Runs group tests.
+
+    Args:
+      env: The test environment.
+    """
     cases = [
         # 7. Groups and Backreferences (Backreferences not supported, but groups are)
         ("(orange) (apple)", "orange apple", {0: "orange apple", 1: "orange", 2: "apple"}),

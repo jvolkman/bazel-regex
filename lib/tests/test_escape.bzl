@@ -13,7 +13,11 @@ def _test_escape_impl(ctx):
 escape_test = unittest.make(_test_escape_impl)
 
 def run_tests_escape(env):
-    """Runs escape tests."""
+    """Runs escape tests.
+
+    Args:
+      env: The test environment.
+    """
 
     # 1. Standard Escapes
     assert_match(env, "\\.", ".", ".")

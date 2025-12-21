@@ -14,7 +14,11 @@ def _test_api_impl(ctx):
 api_test = unittest.make(_test_api_impl)
 
 def run_tests_api(env):
-    """Runs API tests."""
+    """Runs API tests.
+
+    Args:
+      env: The test environment.
+    """
 
     # 1. search vs match vs fullmatch
     assert_eq(env, bool(search("abc", "xabcy")), True, "search should find in middle")
