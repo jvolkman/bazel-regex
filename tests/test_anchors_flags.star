@@ -31,5 +31,26 @@ def run_tests_anchors_flags():
         ("(?s).+", "line1\nline2", {0: "line1\nline2"}),
         ("(?s).+", "line1\nline2", {0: "line1\nline2"}),
         ("(?-s).+", "line1\nline2", {0: "line1"}),
+
+        # RE2 Compatibility: Absolute Anchors
+        ("\\Aabc", "abc", {0: "abc"}),
+        ("\\Aabc", "xabc", None),
+        ("abc\\z", "abc", {0: "abc"}),
+        ("abc\\z", "abc\n", None),
+
+        # RE2 Compatibility: Scoped Flags
+        ("(?i:a)b", "Ab", {0: "Ab"}),
+        ("(?i:a)b", "AB", None),
+        ("(?i:a)b", "ab", {0: "ab"}),
+        ("(?i:a(?-i:b)c)", "Abc", {0: "Abc"}),
+        ("(?i:a(?-i:b)c)", "AbC", {0: "AbC"}),
+
+        # RE2 Compatibility: Ungreedy Flag
+        ("(?U)a*", "aaa", {0: ""}),  # Prefer fewer
+        ("(?U)a*?", "aaa", {0: "aaa"}),  # Swapped: prefer more
+        ("(?U)a+", "aaa", {0: "a"}),
+        ("(?U)a+?", "aaa", {0: "aaa"}),
+        ("(?U)a{1,3}", "aaa", {0: "a"}),
+        ("(?U:a*)b", "aaab", {0: "aaab"}),  # Scoped ungreedy
     ]
     run_suite("Anchors & Flags Tests", cases)

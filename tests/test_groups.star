@@ -14,5 +14,8 @@ def run_tests_groups():
         # 7. Non-capturing groups
         ("(?:orange)", "orange", {0: "orange"}),
         ("(?:orange)-(\\d+)", "orange-123", {0: "orange-123", 1: "123"}),
+
+        # RE2 Compatibility: Alternative Named Group Syntax
+        ("(?<name>abc)", "abc", {0: "abc", "name": "abc"}),
     ]
     run_suite("Group Tests", cases)

@@ -23,5 +23,12 @@ def run_tests_quantifiers():
         # 11. Quantifiers on groups
         ("(abc)?def", "abcdef", {0: "abcdef", 1: "abc"}),
         ("(abc)?def", "def", {0: "def"}),
+
+        # RE2 Compatibility: Repetitions Edge Cases
+        ("a{0,}", "", {0: ""}),
+        ("a{0,}", "aaa", {0: "aaa"}),
+        ("a{2,}", "a", None),
+        ("a{2,}", "aa", {0: "aa"}),
+        ("a{2,}", "aaa", {0: "aaa"}),
     ]
     run_suite("Quantifier Tests", cases)
