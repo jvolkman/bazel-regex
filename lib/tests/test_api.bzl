@@ -69,3 +69,15 @@ def run_tests_api(env):
 
     m = search(r"(?P<name>a)|(b)", "a")
     assert_eq(env, m.lastgroup, "name", "lastgroup for alternation")
+
+    # 7. has_case_insensitive optimization flag
+    m1 = search("abc", "abc")
+    assert_eq(env, m1.re.has_case_insensitive, False, "case sensitive should not have flag")
+    m2 = search("(?i)abc", "abc")
+    assert_eq(env, m2.re.has_case_insensitive, True, "case insensitive should have flag")
+
+    # 8. opt optimization struct
+    m3 = match(r"^1\w*", "1ccc")
+    assert_eq(env, m3.re.opt != None, True, "should have opt struct for ^prefix[set]*")
+    assert_eq(env, m3.re.opt.prefix, "1", "opt.prefix should be 1")
+    assert_eq(env, "c" in m3.re.opt.set_chars, True, "opt.set_chars should include c")

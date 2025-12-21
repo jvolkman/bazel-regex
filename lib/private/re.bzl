@@ -67,6 +67,11 @@ _CHR_LOOKUP = (
 def _chr(i):
     return _CHR_LOOKUP[i]
 
+_ORD_LOOKUP = {_CHR_LOOKUP[i]: i for i in range(256)}
+
+def _ord(c):
+    return _ORD_LOOKUP[c]
+
 # Bytecode Instructions
 OP_CHAR = 0  # Match specific character
 OP_ANY = 1  # Match any character (including \n)
@@ -139,6 +144,58 @@ def _get_posix_class(name):
     elif name == "xdigit":
         return [("0", "9"), ("A", "F"), ("a", "f")]
     return None
+
+def _make_set_struct(char_set, case_insensitive = False):
+    """Creates a struct for a character set, with mixed-case expansion if needed."""
+    all_chars_list = []
+
+    # Expansion limit for all_chars string (to avoid huge strings)
+    # 2048 is reasonable for most use cases
+    ALL_CHARS_LIMIT = 2048
+
+    processed_items = []
+    for item in char_set:
+        if type(item) == "tuple":
+            if item[0] == "not":
+                # For negated POSIX classes, we can't easily expand into all_chars
+                # Just keep it as a raw item
+                processed_items.append(item)
+                continue
+
+            start_code = _ord(item[0])
+            end_code = _ord(item[1])
+
+            if case_insensitive:
+                # Add both cases to all_chars_list
+                for code in range(start_code, end_code + 1):
+                    c = _chr(code)
+                    all_chars_list.append(c.lower())
+                    all_chars_list.append(c.upper())
+            else:
+                for code in range(start_code, end_code + 1):
+                    all_chars_list.append(_chr(code))
+            processed_items.append(item)
+        else:
+            if case_insensitive:
+                all_chars_list.append(item.lower())
+                all_chars_list.append(item.upper())
+            else:
+                all_chars_list.append(item)
+            processed_items.append(item)
+
+    # Deduplicate all_chars_list and build string
+    all_chars_str = ""
+    seen = {}
+    for c in all_chars_list:
+        if c not in seen:
+            seen[c] = True
+            if len(all_chars_str) < ALL_CHARS_LIMIT:
+                all_chars_str += c
+
+    return struct(
+        raw = processed_items,
+        all_chars = all_chars_str,
+    )
 
 def _parse_escape(pattern, i, pattern_len):
     """Parses an escape sequence at i. Returns (char, last_consumed_i)."""
@@ -284,6 +341,7 @@ def _compile_regex(pattern, start_group_id = 0):
     multiline = False
     dot_all = False
     ungreedy = False
+    has_case_insensitive = False
 
     # Always save group 0 (full match) start
     instructions += [(OP_SAVE, 0, None, None)]
@@ -356,10 +414,12 @@ def _compile_regex(pattern, start_group_id = 0):
                         char_set += chars
                     i = new_i
 
+            set_struct = _make_set_struct(char_set, case_insensitive = case_insensitive)
             if case_insensitive:
-                instructions += [(OP_SET_I, (char_set, is_negated), None, None)]
+                has_case_insensitive = True
+                instructions += [(OP_SET_I, (set_struct, is_negated), None, None)]
             else:
-                instructions += [(OP_SET, (char_set, is_negated), None, None)]
+                instructions += [(OP_SET, (set_struct, is_negated), None, None)]
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "(":
@@ -537,6 +597,7 @@ def _compile_regex(pattern, start_group_id = 0):
                             # Match everything from i to k as literal
                             for j in range(i, k):
                                 if case_insensitive:
+                                    has_case_insensitive = True
                                     instructions += [(OP_CHAR_I, pattern[j].lower(), None, None)]
                                 else:
                                     instructions += [(OP_CHAR, pattern[j], None, None)]
@@ -547,6 +608,7 @@ def _compile_regex(pattern, start_group_id = 0):
                         # Match to end
                         for j in range(i, pattern_len):
                             if case_insensitive:
+                                has_case_insensitive = True
                                 instructions += [(OP_CHAR_I, pattern[j].lower(), None, None)]
                             else:
                                 instructions += [(OP_CHAR, pattern[j], None, None)]
@@ -561,7 +623,13 @@ def _compile_regex(pattern, start_group_id = 0):
                 predef = _get_predefined_class(next_c)
                 if predef:
                     # predef is (list, is_negated)
-                    instructions += [(OP_SET, predef, None, None)]
+                    chars, is_negated = predef
+                    set_struct = _make_set_struct(chars, case_insensitive = case_insensitive)
+                    if case_insensitive:
+                        has_case_insensitive = True
+                        instructions += [(OP_SET_I, (set_struct, is_negated), None, None)]
+                    else:
+                        instructions += [(OP_SET, (set_struct, is_negated), None, None)]
                 elif next_c == "b":
                     instructions += [(OP_WORD_BOUNDARY, None, None, None)]
                 elif next_c == "B":
@@ -572,6 +640,7 @@ def _compile_regex(pattern, start_group_id = 0):
                     i = new_i
 
                     if case_insensitive:
+                        has_case_insensitive = True
                         if char:
                             char = char.lower()
                         instructions += [(OP_CHAR_I, char, None, None)]
@@ -581,6 +650,7 @@ def _compile_regex(pattern, start_group_id = 0):
 
         else:
             if case_insensitive:
+                has_case_insensitive = True
                 instructions += [(OP_CHAR_I, char.lower(), None, None)]
             else:
                 instructions += [(OP_CHAR, char, None, None)]
@@ -603,7 +673,7 @@ def _compile_regex(pattern, start_group_id = 0):
     instructions += [(OP_SAVE, 1, None, None)]
     instructions += [(OP_MATCH, None, None, None)]
 
-    return instructions, named_groups, group_count
+    return instructions, named_groups, group_count, has_case_insensitive
 
 # buildifier: disable=list-append
 def _build_alt_tree(instructions, group_ctx):
@@ -912,9 +982,9 @@ def _check_simple_match(inst, char, char_lower):
     elif itype == OP_ANY_NO_NL:
         return char != "\n"
     elif itype == OP_SET:
-        char_set_data, is_negated = inst[1]
+        set_struct, is_negated = inst[1]
         in_set = False
-        for item in char_set_data:
+        for item in set_struct.raw:
             if type(item) == "tuple":
                 if item[0] == "not":
                     # Negated POSIX class inside []
@@ -938,9 +1008,9 @@ def _check_simple_match(inst, char, char_lower):
                 break
         return (in_set != is_negated)
     elif itype == OP_SET_I:
-        char_set_data, is_negated = inst[1]
+        set_struct, is_negated = inst[1]
         in_set = False
-        for item in char_set_data:
+        for item in set_struct.raw:
             if type(item) == "tuple":
                 if item[0] == "not":
                     # Negated POSIX class inside []
@@ -1004,12 +1074,14 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
     return next_threads, match_regs
 
 # buildifier: disable=list-append
-def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
+def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False, has_case_insensitive = False):
     if initial_regs == None:
         initial_regs = [-1] * (num_regs + 1)  # +1 for lastindex
 
     input_len = len(input_str)
-    input_lower = input_str.lower()
+    input_lower = None
+    if has_case_insensitive:
+        input_lower = input_str.lower()
 
     # Current active threads: list of (pc, regs)
     current_threads = _get_epsilon_closure(
@@ -1027,7 +1099,9 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
     # We go up to input_len inclusive to handle matches at the very end (like $)
     for char_idx in range(start_index, input_len + 1):
         char = input_str[char_idx] if char_idx < input_len else None
-        char_lower = input_lower[char_idx] if char_idx < input_len else None
+        char_lower = None
+        if input_lower != None and char_idx < input_len:
+            char_lower = input_lower[char_idx]
 
         # Unanchored Search Injection
         if not anchored and char_idx <= input_len:
@@ -1085,8 +1159,8 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
 
     return match_regs
 
-def _execute(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False):
-    return _execute_core(instructions, input_str, num_regs, start_index, initial_regs, anchored)
+def _execute(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False, has_case_insensitive = False):
+    return _execute_core(instructions, input_str, num_regs, start_index, initial_regs, anchored, has_case_insensitive)
 
 def _expand_replacement(repl, match_str, groups, named_groups = {}):
     """Expands backreferences in replacement string."""
@@ -1137,23 +1211,94 @@ def _expand_replacement(repl, match_str, groups, named_groups = {}):
         res += c
     return res
 
-def _search_regs(bytecode, text, group_count, start_index = 0):
-    num_regs = (group_count + 1) * 2
-    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = False)
+def _optimize_matcher(instructions):
+    """Detects simple patterns that can be executed on a fast path."""
+    if not instructions:
+        return None
 
-def _match_regs(bytecode, text, group_count, start_index = 0):
-    num_regs = (group_count + 1) * 2
-    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = True)
+    # Pattern: ^literal...
+    # instructions[0] is SAVE 0
+    # check instructions[1]
+    prefix = ""
+    idx = 1
+    case_insensitive_prefix = False
 
-def _fullmatch_regs(bytecode, text, group_count, start_index = 0):
+    # Check for anchors
+    is_anchored_start = False
+    if instructions[idx][0] == OP_ANCHOR_START:
+        is_anchored_start = True
+        idx += 1
+
+    if not is_anchored_start:
+        return None
+
+    # Collect prefix literals
+    for _ in range(len(instructions)):
+        if idx >= len(instructions):
+            break
+        itype = instructions[idx][0]
+        if itype == OP_CHAR:
+            prefix += instructions[idx][1]
+            idx += 1
+        elif itype == OP_CHAR_I:
+            # We don't support mixed case prefix optimization easily yet
+            # because startswith is case-sensitive.
+            # But we can store that it's a case-insensitive prefix.
+            prefix += instructions[idx][1]
+            case_insensitive_prefix = True
+            idx += 1
+        else:
+            break
+
+    # After prefix, check for a simple [set]* loop
+    # Pattern: [set]* -> 0: SPLIT(1, 4), 1: SET, 2: JUMP 0, 4: ...
+    set_chars = None
+    if idx + 2 < len(instructions):
+        itype = instructions[idx][0]
+        if itype == OP_SPLIT:
+            loop_target = instructions[idx][2]
+            loop_exit = instructions[idx][3]
+            if loop_target == idx + 1 and loop_exit == idx + 3:
+                # Potential loop
+                set_inst = instructions[idx + 1]
+                jump_inst = instructions[idx + 2]
+                if set_inst[0] in [OP_SET, OP_SET_I] and jump_inst[0] == OP_JUMP and jump_inst[2] == idx:
+                    # Match!
+                    # Check if it was negated. Fast path only supports positive sets for now.
+                    set_data, is_negated = set_inst[1]
+                    if not is_negated:
+                        set_chars = set_data.all_chars
+                        idx += 3
+
+    # Check if we reached the matching end: SAVE 1, MATCH
+    if idx + 1 < len(instructions):
+        if instructions[idx][0] == OP_SAVE and instructions[idx][1] == 1:
+            if instructions[idx + 1][0] == OP_MATCH:
+                return struct(
+                    prefix = prefix,
+                    case_insensitive_prefix = case_insensitive_prefix,
+                    set_chars = set_chars,
+                )
+
+    return None
+
+def _search_regs(bytecode, text, group_count, start_index = 0, has_case_insensitive = False):
     num_regs = (group_count + 1) * 2
-    regs = _execute(bytecode, text, num_regs, start_index = start_index, anchored = True)
+    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = False, has_case_insensitive = has_case_insensitive)
+
+def _match_regs(bytecode, text, group_count, start_index = 0, has_case_insensitive = False):
+    num_regs = (group_count + 1) * 2
+    return _execute(bytecode, text, num_regs, start_index = start_index, anchored = True, has_case_insensitive = has_case_insensitive)
+
+def _fullmatch_regs(bytecode, text, group_count, start_index = 0, has_case_insensitive = False):
+    num_regs = (group_count + 1) * 2
+    regs = _execute(bytecode, text, num_regs, start_index = start_index, anchored = True, has_case_insensitive = has_case_insensitive)
     if regs and regs[1] != len(text):
         return None
     return regs
 
-def _search_bytecode(bytecode, text, named_groups, group_count):
-    regs = _search_regs(bytecode, text, group_count)
+def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+    regs = _search_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1161,11 +1306,40 @@ def _search_bytecode(bytecode, text, named_groups, group_count):
         named_groups = named_groups,
         group_count = group_count,
         pattern = None,
+        has_case_insensitive = has_case_insensitive,
+        opt = opt,
     )
     return _MatchObject(text, regs, compiled, 0, len(text))
 
-def _match_bytecode(bytecode, text, named_groups, group_count):
-    regs = _match_regs(bytecode, text, group_count)
+def _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+    # Fast path optimization
+    if opt and not has_case_insensitive:
+        # Simple anchored prefix match
+        if text.startswith(opt.prefix):
+            match_end = len(opt.prefix)
+            if opt.set_chars != None:
+                # Greedy set match
+                rest = text[match_end:]
+                stripped = rest.lstrip(opt.set_chars)
+                match_end += len(rest) - len(stripped)
+
+            # For match(), it doesn't have to consume everything.
+            # But we need to return regs.
+            # Simplified: regs[0]=0, regs[1]=match_end, all others -1
+            regs = [-1] * ((group_count + 1) * 2 + 1)
+            regs[0] = 0
+            regs[1] = match_end
+            compiled = struct(
+                bytecode = bytecode,
+                named_groups = named_groups,
+                group_count = group_count,
+                pattern = None,
+                has_case_insensitive = has_case_insensitive,
+                opt = opt,
+            )
+            return _MatchObject(text, regs, compiled, 0, len(text))
+
+    regs = _match_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1173,11 +1347,13 @@ def _match_bytecode(bytecode, text, named_groups, group_count):
         named_groups = named_groups,
         group_count = group_count,
         pattern = None,
+        has_case_insensitive = has_case_insensitive,
+        opt = opt,
     )
     return _MatchObject(text, regs, compiled, 0, len(text))
 
-def _fullmatch_bytecode(bytecode, text, named_groups, group_count):
-    regs = _fullmatch_regs(bytecode, text, group_count)
+def _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+    regs = _fullmatch_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1185,6 +1361,8 @@ def _fullmatch_bytecode(bytecode, text, named_groups, group_count):
         named_groups = named_groups,
         group_count = group_count,
         pattern = None,
+        has_case_insensitive = has_case_insensitive,
+        opt = opt,
     )
     return _MatchObject(text, regs, compiled, 0, len(text))
 
@@ -1197,16 +1375,17 @@ def compile(pattern):
     Returns:
       A struct containing the compiled bytecode and methods.
     """
-    bytecode, named_groups, group_count = _compile_regex(pattern)
+    bytecode, named_groups, group_count, has_case_insensitive = _compile_regex(pattern)
+    opt = _optimize_matcher(bytecode)
 
     def _search(text):
-        return _search_bytecode(bytecode, text, named_groups, group_count)
+        return _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive)
 
     def _match(text):
-        return _match_bytecode(bytecode, text, named_groups, group_count)
+        return _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
 
     def _fullmatch(text):
-        return _fullmatch_bytecode(bytecode, text, named_groups, group_count)
+        return _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive)
 
     return struct(
         search = _search,
@@ -1216,6 +1395,8 @@ def compile(pattern):
         named_groups = named_groups,
         group_count = group_count,
         pattern = pattern,
+        has_case_insensitive = has_case_insensitive,
+        opt = opt,
     )
 
 def search(pattern, text):
@@ -1230,21 +1411,17 @@ def search(pattern, text):
       or None if no match was found.
     """
     if type(pattern) == "string":
-        bytecode, named_groups, group_count = _compile_regex(pattern)
-        compiled = struct(
-            bytecode = bytecode,
-            named_groups = named_groups,
-            group_count = group_count,
-            pattern = pattern,
-        )
+        compiled = compile(pattern)
+        bytecode = compiled.bytecode
+        group_count = compiled.group_count
+        has_case_insensitive = compiled.has_case_insensitive
     else:
-        # Assume it's a compiled regex object (struct)
         compiled = pattern
         bytecode = pattern.bytecode
-        named_groups = pattern.named_groups
         group_count = pattern.group_count
+        has_case_insensitive = pattern.has_case_insensitive
 
-    regs = _search_regs(bytecode, text, group_count)
+    regs = _search_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
 
@@ -1262,25 +1439,19 @@ def match(pattern, text):
       or None if no match was found.
     """
     if type(pattern) == "string":
-        bytecode, named_groups, group_count = _compile_regex(pattern)
-        compiled = struct(
-            bytecode = bytecode,
-            named_groups = named_groups,
-            group_count = group_count,
-            pattern = pattern,
-        )
+        compiled = compile(pattern)
+        bytecode = compiled.bytecode
+        group_count = compiled.group_count
+        has_case_insensitive = compiled.has_case_insensitive
+        opt = compiled.opt
     else:
-        # Assume it's a compiled regex object (struct)
         compiled = pattern
         bytecode = pattern.bytecode
-        named_groups = pattern.named_groups
         group_count = pattern.group_count
+        has_case_insensitive = pattern.has_case_insensitive
+        opt = getattr(pattern, "opt", None)
 
-    regs = _match_regs(bytecode, text, group_count)
-    if not regs:
-        return None
-
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _match_bytecode(bytecode, text, compiled.named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
 
 def fullmatch(pattern, text):
     """Try to apply the pattern to the entire string.
@@ -1294,21 +1465,17 @@ def fullmatch(pattern, text):
       or None if no match was found.
     """
     if type(pattern) == "string":
-        bytecode, named_groups, group_count = _compile_regex(pattern)
-        compiled = struct(
-            bytecode = bytecode,
-            named_groups = named_groups,
-            group_count = group_count,
-            pattern = pattern,
-        )
+        compiled = compile(pattern)
+        bytecode = compiled.bytecode
+        group_count = compiled.group_count
+        has_case_insensitive = compiled.has_case_insensitive
     else:
-        # Assume it's a compiled regex object (struct)
         compiled = pattern
         bytecode = pattern.bytecode
-        named_groups = pattern.named_groups
         group_count = pattern.group_count
+        has_case_insensitive = pattern.has_case_insensitive
 
-    regs = _fullmatch_regs(bytecode, text, group_count)
+    regs = _fullmatch_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
 
@@ -1344,7 +1511,7 @@ def findall(pattern, text):
     # Starlark doesn't support while loops, so we use a large range
     # Max possible matches is len(text) + 1 (for empty matches)
     for _ in range(text_len + 2):
-        regs = _execute(bytecode, text, num_regs, start_index = start_index)
+        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
         if not regs:
             break
 
@@ -1493,7 +1660,7 @@ def sub(pattern, repl, text, count = 0):
         if count > 0 and matches_found >= count:
             break
 
-        regs = _execute(bytecode, text, num_regs, start_index = start_index)
+        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
         if not regs:
             break
 
@@ -1569,14 +1736,14 @@ def split(pattern, text, maxsplit = 0):
     last_idx = 0
     start_index = 0
     text_len = len(text)
-    splits = 0
+    splits_found = 0
 
     # Simulate while loop
     for _ in range(text_len + 2):
-        if maxsplit > 0 and splits >= maxsplit:
+        if maxsplit > 0 and splits_found >= maxsplit:
             break
 
-        regs = _execute(bytecode, text, num_regs, start_index = start_index)
+        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
         if not regs:
             break
 
@@ -1600,7 +1767,7 @@ def split(pattern, text, maxsplit = 0):
                     res_parts += [None]
 
         last_idx = match_end
-        splits += 1
+        splits_found += 1
 
         # Advance start_index
         if match_end > match_start:
