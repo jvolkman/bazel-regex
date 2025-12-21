@@ -1375,6 +1375,9 @@ def compile(pattern):
     Returns:
       A struct containing the compiled bytecode and methods.
     """
+    if hasattr(pattern, "bytecode"):
+        return pattern
+
     bytecode, named_groups, group_count, has_case_insensitive = _compile_regex(pattern)
     opt = _optimize_matcher(bytecode)
 
@@ -1410,16 +1413,10 @@ def search(pattern, text):
       A dictionary containing the match results (group ID/name -> matched string),
       or None if no match was found.
     """
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-        bytecode = compiled.bytecode
-        group_count = compiled.group_count
-        has_case_insensitive = compiled.has_case_insensitive
-    else:
-        compiled = pattern
-        bytecode = pattern.bytecode
-        group_count = pattern.group_count
-        has_case_insensitive = pattern.has_case_insensitive
+    compiled = compile(pattern)
+    bytecode = compiled.bytecode
+    group_count = compiled.group_count
+    has_case_insensitive = compiled.has_case_insensitive
 
     regs = _search_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
@@ -1438,18 +1435,11 @@ def match(pattern, text):
       A dictionary containing the match results (group ID/name -> matched string),
       or None if no match was found.
     """
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-        bytecode = compiled.bytecode
-        group_count = compiled.group_count
-        has_case_insensitive = compiled.has_case_insensitive
-        opt = compiled.opt
-    else:
-        compiled = pattern
-        bytecode = pattern.bytecode
-        group_count = pattern.group_count
-        has_case_insensitive = pattern.has_case_insensitive
-        opt = getattr(pattern, "opt", None)
+    compiled = compile(pattern)
+    bytecode = compiled.bytecode
+    group_count = compiled.group_count
+    has_case_insensitive = compiled.has_case_insensitive
+    opt = compiled.opt
 
     return _match_bytecode(bytecode, text, compiled.named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
 
@@ -1464,16 +1454,10 @@ def fullmatch(pattern, text):
       A dictionary containing the match results (group ID/name -> matched string),
       or None if no match was found.
     """
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-        bytecode = compiled.bytecode
-        group_count = compiled.group_count
-        has_case_insensitive = compiled.has_case_insensitive
-    else:
-        compiled = pattern
-        bytecode = pattern.bytecode
-        group_count = pattern.group_count
-        has_case_insensitive = pattern.has_case_insensitive
+    compiled = compile(pattern)
+    bytecode = compiled.bytecode
+    group_count = compiled.group_count
+    has_case_insensitive = compiled.has_case_insensitive
 
     regs = _fullmatch_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
     if not regs:
@@ -1495,11 +1479,7 @@ def findall(pattern, text):
     Returns:
       A list of matching strings or tuples of matching groups.
     """
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-    else:
-        compiled = pattern
-
+    compiled = compile(pattern)
     bytecode = compiled.bytecode
     group_count = compiled.group_count
     num_regs = (group_count + 1) * 2
@@ -1635,10 +1615,7 @@ def sub(pattern, repl, text, count = 0):
     """
 
     # We need named groups for \g<name>, so we need the compiled object.
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-    else:
-        compiled = pattern
+    compiled = compile(pattern)
 
     # Reuse findall logic but we need the match objects (start/end indices)
     # findall returns strings/tuples, which loses index info.
@@ -1723,11 +1700,7 @@ def split(pattern, text, maxsplit = 0):
       A list of strings.
     """
 
-    if type(pattern) == "string":
-        compiled = compile(pattern)
-    else:
-        compiled = pattern
-
+    compiled = compile(pattern)
     bytecode = compiled.bytecode
     group_count = compiled.group_count
     num_regs = (group_count + 1) * 2
