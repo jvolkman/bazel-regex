@@ -99,10 +99,10 @@ def _is_word_char(c):
 _PREDEFINED_CLASSES = {
     "d": ([("0", "9")], False),
     "D": ([("0", "9")], True),
-    "w": ([("a", "z"), ("A", "Z"), ("0", "9"), "_"], False),
-    "W": ([("a", "z"), ("A", "Z"), ("0", "9"), "_"], True),
-    "s": ([" ", "\t", "\n", "\r", "\f", "\v"], False),
-    "S": ([" ", "\t", "\n", "\r", "\f", "\v"], True),
+    "w": ([("a", "z"), ("A", "Z"), ("0", "9"), ("_", "_")], False),
+    "W": ([("a", "z"), ("A", "Z"), ("0", "9"), ("_", "_")], True),
+    "s": ([(" ", " "), ("\t", "\t"), ("\n", "\n"), ("\r", "\r"), ("\f", "\f"), ("\v", "\v")], False),
+    "S": ([(" ", " "), ("\t", "\t"), ("\n", "\n"), ("\r", "\r"), ("\f", "\f"), ("\v", "\v")], True),
 }
 
 def _get_predefined_class(char):
@@ -113,16 +113,16 @@ _POSIX_CLASSES = {
     "alnum": [("0", "9"), ("A", "Z"), ("a", "z")],
     "alpha": [("A", "Z"), ("a", "z")],
     "ascii": [("\000", "\177")],
-    "blank": [" ", "\t"],
-    "cntrl": [("\000", "\037"), "\177"],
+    "blank": [(" ", " "), ("\t", "\t")],
+    "cntrl": [("\000", "\037"), ("\177", "\177")],
     "digit": [("0", "9")],
     "graph": [("\041", "\176")],
     "lower": [("a", "z")],
     "print": [("\040", "\176")],
     "punct": [("\041", "\057"), ("\072", "\100"), ("\133", "\140"), ("\173", "\176")],
-    "space": [" ", "\t", "\n", "\r", "\f", "\v"],
+    "space": [(" ", " "), ("\t", "\t"), ("\n", "\n"), ("\r", "\r"), ("\f", "\f"), ("\v", "\v")],
     "upper": [("A", "Z")],
-    "word": [("0", "9"), ("A", "Z"), ("a", "z"), "_"],
+    "word": [("0", "9"), ("A", "Z"), ("a", "z"), ("_", "_")],
     "xdigit": [("0", "9"), ("A", "F"), ("a", "f")],
 }
 
@@ -212,14 +212,10 @@ def _char_in_set(set_struct, c):
             return True
 
     for pset in set_struct.negated_posix:
-        # pset is a list of atoms. Character must NOT be in this pset.
+        # pset is a list of (start, end) tuples. Character must NOT be in this pset.
         in_pset = False
-        for item in pset:
-            if type(item) == "tuple":
-                if c >= item[0] and c <= item[1]:
-                    in_pset = True
-                    break
-            elif c == item:
+        for r_start, r_end in pset:
+            if c >= r_start and c <= r_end:
                 in_pset = True
                 break
         if not in_pset:
@@ -422,10 +418,7 @@ def _compile_regex(pattern, start_group_id = 0):
                         builder.add_char(atom.char)
                     elif atom.atoms != None:
                         for item in atom.atoms:
-                            if type(item) == "tuple":
-                                builder.add_range(item[0], item[1])
-                            else:
-                                builder.add_char(item)
+                            builder.add_range(item[0], item[1])
                     elif atom.negated_atoms != None:
                         builder.add_negated_posix(atom.negated_atoms)
                     i = new_i
@@ -645,11 +638,8 @@ def _compile_regex(pattern, start_group_id = 0):
                     # predef is (list, is_negated)
                     chars, is_negated = predef
                     builder = _new_set_builder(case_insensitive = case_insensitive)
-                    for item in chars:
-                        if type(item) == "tuple":
-                            builder.add_range(item[0], item[1])
-                        else:
-                            builder.add_char(item)
+                    for r_start, r_end in chars:
+                        builder.add_range(r_start, r_end)
                     set_struct = builder.build()
                     if case_insensitive:
                         has_case_insensitive = True
