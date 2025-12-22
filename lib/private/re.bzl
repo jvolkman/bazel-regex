@@ -142,50 +142,54 @@ _SIMPLE_ESCAPES = {
 # buildifier: disable=list-append
 def _make_set_struct(char_set, case_insensitive = False):
     """Creates a struct for a character set, with mixed-case expansion if needed."""
+    lookup = {}
+    raw = []
     all_chars_list = []
 
-    # Expansion limit for all_chars string (to avoid huge strings)
-    # 2048 is reasonable for most use cases
-    ALL_CHARS_LIMIT = 2048
+    # Expansion limit for range expansion into lookup/all_chars.
+    RANGE_EXPANSION_LIMIT = 512
 
-    processed_items = []
+    # Cap for all_chars string used in optimizations.
+    ALL_CHARS_STR_LIMIT = 2048
+
     for item in char_set:
         if type(item) == "tuple":
             if item[0] == "not":
-                # For negated POSIX classes, we can't easily expand into all_chars
-                # Just keep it as a raw item
-                processed_items += [item]
+                raw += [item]
                 continue
 
             start_code = _ord(item[0])
             end_code = _ord(item[1])
+            dist = end_code - start_code
 
-            if case_insensitive:
-                # Only need lowercase since matches are against char_lower
+            if dist < RANGE_EXPANSION_LIMIT:
                 for code in range(start_code, end_code + 1):
-                    all_chars_list += [_chr(code).lower()]
+                    c = _chr(code)
+                    if case_insensitive:
+                        c = c.lower()
+                    lookup[c] = True
+                    all_chars_list += [c]
             else:
-                for code in range(start_code, end_code + 1):
-                    all_chars_list += [_chr(code)]
-            processed_items += [item]
+                raw += [item]
         else:
+            c = item
             if case_insensitive:
-                all_chars_list += [item.lower()]
-            else:
-                all_chars_list += [item]
-            processed_items += [item]
+                c = c.lower()
+            lookup[c] = True
+            all_chars_list += [c]
 
-    # Deduplicate all_chars_list and build string
+    # Deduplicate for all_chars_str (lookup handles it for the dict)
     all_chars_str = ""
-    seen = {}
+    seen_str = {}
     for c in all_chars_list:
-        if c not in seen:
-            seen[c] = True
-            if len(all_chars_str) < ALL_CHARS_LIMIT:
+        if c not in seen_str:
+            seen_str[c] = True
+            if len(all_chars_str) < ALL_CHARS_STR_LIMIT:
                 all_chars_str += c
 
     return struct(
-        raw = processed_items,
+        lookup = lookup,
+        raw = raw,
         all_chars = all_chars_str,
     )
 
@@ -874,106 +878,128 @@ def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
 # buildifier: disable=list-append
 def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx):
     reachable = []
-
-    # PC is visited if it's already in visited OR it's already in the stack.
-    # To keep it simple and correct for Thompson priority, we use a single visited set.
-    visited = {}
-
-    # Thompson NFA: The first time we reach a PC in an epsilon closure,
-    # it's the highest priority route to that PC.
-    stack = [(start_pc, start_regs)]
-    visited[start_pc] = True
-
     num_inst = len(instructions)
 
-    # Limit to prevent infinite epsilon loops (though bytecode should be safe)
-    limit = num_inst + 20
+    # Use a list for visited states. 0 = not visited, 1 = visited.
+    # List access by index is very fast in Starlark.
+    visited = [0] * num_inst
+    visited[start_pc] = 1
+
+    # Thompson NFA: The first time we reach a PC, it's via the highest priority path.
+    stack = [(start_pc, start_regs)]
+
+    # Outer loop handles exploration from stack.
+    # Inner loop follows single-thread transitions.
+    limit = num_inst * 2 + 100
+    inner_limit = num_inst + 10
+
     for _ in range(limit):
         if not stack:
             break
         pc, regs = stack.pop()
 
-        inst = instructions[pc]
-        itype = inst[0]
+        # Inner loop to follow a thread's epsilon transitions.
+        for _ in range(inner_limit):
+            if pc >= num_inst:
+                break
+            inst = instructions[pc]
+            itype = inst[0]
 
-        if itype == OP_SPLIT:
-            pc1 = inst[2]
-            pc2 = inst[3]
+            if itype == OP_SPLIT:
+                pc1, pc2 = inst[2], inst[3]
 
-            # Branch 2 (pc2) has lower priority
-            if pc2 not in visited:
-                visited[pc2] = True
-                stack += [(pc2, list(regs))]  # buildifier: disable=list-plus
+                # Branch 2 has lower priority. Push to stack for later.
+                if pc2 < num_inst and not visited[pc2]:
+                    visited[pc2] = 1
 
-            # Branch 1 (inst[2]) has higher priority
-            if pc1 not in visited:
-                visited[pc1] = True
-                stack += [(pc1, regs)]  # buildifier: disable=list-plus
+                    # Must copy registers for the forked path.
+                    stack += [(pc2, list(regs))]
 
-            # Reuse regs for highest priority path
-        elif itype == OP_JUMP:
-            npc = inst[2]
-            if npc not in visited:
-                visited[npc] = True
-                stack += [(npc, regs)]  # buildifier: disable=list-plus
-        elif itype == OP_SAVE:
-            npc = pc + 1
-            if npc not in visited:
-                visited[npc] = True
-                new_regs = list(regs)
+                # Branch 1 has higher priority. Continue inner loop.
+                if pc1 < num_inst and not visited[pc1]:
+                    visited[pc1] = 1
+                    pc = pc1
+                else:
+                    pc = num_inst  # Break inner
+            elif itype == OP_JUMP:
+                pc = inst[2]
+                if pc < num_inst and not visited[pc]:
+                    visited[pc] = 1
+                else:
+                    pc = num_inst  # Break inner
+            elif itype == OP_SAVE:
+                # Optimized: update regs IN-PLACE since this thread owns this regs object.
+                # Safe because _process_batch and OP_SPLIT ensure we have a private copy.
                 reg_idx = inst[1]
-                new_regs[reg_idx] = current_idx
+                regs[reg_idx] = current_idx
                 if reg_idx > 1 and reg_idx % 2 == 1:
-                    new_regs[-1] = reg_idx // 2
-                stack += [(npc, new_regs)]  # buildifier: disable=list-plus
-        elif itype == OP_ANCHOR_START:
-            if current_idx == 0:
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        elif itype == OP_ANCHOR_END:
-            if current_idx == input_len:
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        elif itype == OP_WORD_BOUNDARY:
-            is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
-            is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
-            if is_prev_word != is_curr_word:
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        elif itype == OP_NOT_WORD_BOUNDARY:
-            is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
-            is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
-            if is_prev_word == is_curr_word:
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        elif itype == OP_ANCHOR_LINE_START:
-            if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        elif itype == OP_ANCHOR_LINE_END:
-            if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
-                npc = pc + 1
-                if npc not in visited:
-                    visited[npc] = True
-                    stack += [(npc, regs)]
-        else:
-            # Not an epsilon instruction
-            reachable += [(pc, regs)]  # buildifier: disable=list-plus
+                    regs[-1] = reg_idx // 2
+
+                pc += 1
+                if pc < num_inst and not visited[pc]:
+                    visited[pc] = 1
+                else:
+                    pc = num_inst  # Break inner
+            elif itype == OP_ANCHOR_START:
+                if current_idx == 0:
+                    pc += 1
+                    if pc < num_inst and not visited[pc]:
+                        visited[pc] = 1
+                    else:
+                        pc = num_inst
+                else:
+                    pc = num_inst
+            elif itype == OP_ANCHOR_END:
+                if current_idx == input_len:
+                    pc += 1
+                    if pc < num_inst and not visited[pc]:
+                        visited[pc] = 1
+                    else:
+                        pc = num_inst
+                else:
+                    pc = num_inst
+            elif itype == OP_WORD_BOUNDARY or itype == OP_NOT_WORD_BOUNDARY:
+                is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
+                is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
+                match = (is_prev_word != is_curr_word) if itype == OP_WORD_BOUNDARY else (is_prev_word == is_curr_word)
+                if match:
+                    pc += 1
+                    if pc < num_inst and not visited[pc]:
+                        visited[pc] = 1
+                    else:
+                        pc = num_inst
+                else:
+                    pc = num_inst
+            elif itype == OP_ANCHOR_LINE_START:
+                if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
+                    pc += 1
+                    if pc < num_inst and not visited[pc]:
+                        visited[pc] = 1
+                    else:
+                        pc = num_inst
+                else:
+                    pc = num_inst
+            elif itype == OP_ANCHOR_LINE_END:
+                if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
+                    pc += 1
+                    if pc < num_inst and not visited[pc]:
+                        visited[pc] = 1
+                    else:
+                        pc = num_inst
+                else:
+                    pc = num_inst
+            else:
+                # Not an epsilon instruction (e.g. OP_CHAR, OP_MATCH, OP_SET)
+                reachable += [(pc, regs)]
+                break
 
     return reachable
 
 def _char_in_set(set_struct, c):
-    """Checks if character c is in the set_struct.raw definition."""
+    """Checks if character c is in the set_struct.lookup or raw definition."""
+    if c in set_struct.lookup:
+        return True
+
     for item in set_struct.raw:
         if type(item) == "tuple":
             if item[0] == "not":
@@ -993,24 +1019,6 @@ def _char_in_set(set_struct, c):
                 return True
         elif c == item:
             return True
-    return False
-
-def _check_simple_match(inst, char, char_lower):
-    itype = inst[0]
-    if itype == OP_CHAR:
-        return inst[1] == char
-    elif itype == OP_CHAR_I:
-        return inst[1] == char_lower
-    elif itype == OP_ANY:
-        return True
-    elif itype == OP_ANY_NO_NL:
-        return char != "\n"
-    elif itype == OP_SET:
-        set_struct, is_negated = inst[1]
-        return (_char_in_set(set_struct, char) != is_negated)
-    elif itype == OP_SET_I:
-        set_struct, is_negated = inst[1]
-        return (_char_in_set(set_struct, char_lower) != is_negated)
     return False
 
 # buildifier: disable=list-append
@@ -1034,11 +1042,24 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
             continue
 
         match_found = False
-        if itype in [OP_CHAR, OP_ANY, OP_ANY_NO_NL, OP_SET, OP_CHAR_I, OP_SET_I]:
-            match_found = _check_simple_match(inst, char, char_lower)
+        if itype == OP_CHAR:
+            match_found = (inst[1] == char)
+        elif itype == OP_CHAR_I:
+            match_found = (inst[1] == char_lower)
+        elif itype == OP_ANY:
+            match_found = True
+        elif itype == OP_ANY_NO_NL:
+            match_found = (char != "\n")
+        elif itype == OP_SET:
+            set_struct, is_negated = inst[1]
+            match_found = (_char_in_set(set_struct, char) != is_negated)
+        elif itype == OP_SET_I:
+            set_struct, is_negated = inst[1]
+            match_found = (_char_in_set(set_struct, char_lower) != is_negated)
 
         if match_found:
-            closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs, char_idx + 1)
+            # We must pass a COPY of regs because _get_epsilon_closure will modify it in-place.
+            closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, list(regs), char_idx + 1)
             for c_pc, c_regs in closure:
                 if c_pc not in next_threads_dict:
                     next_threads_dict[c_pc] = c_regs
