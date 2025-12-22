@@ -93,6 +93,8 @@ OP_ANCHOR_LINE_START = 12  # Match start or after \n
 OP_ANCHOR_LINE_END = 13  # Match end or before \n
 OP_CHAR_I = 14  # Match character case-insensitively
 OP_SET_I = 15  # Match set case-insensitively
+OP_STRING = 16  # Match string literally
+OP_STRING_I = 17  # Match string case-insensitively
 
 def _is_word_char(c):
     """Returns True if c is [a-zA-Z0-9_]."""
@@ -720,7 +722,84 @@ def _compile_regex(pattern, start_group_id = 0):
     instructions += [(OP_SAVE, 1, None, None)]
     instructions += [(OP_MATCH, None, None, None)]
 
+    instructions = _optimize_bytecode(instructions)
+
     return instructions, named_groups, group_count, has_case_insensitive
+
+# buildifier: disable=list-append
+def _optimize_bytecode(instructions):
+    """Merges consecutive characters into strings to speed up matching."""
+    if not instructions:
+        return []
+
+    # 1. Find all jump targets to avoid merging across them
+    targets = {0: True, len(instructions): True}
+    for inst in instructions:
+        itype, _, pc1, pc2 = inst
+        if itype == OP_JUMP:
+            targets[pc1] = True
+        elif itype == OP_SPLIT:
+            targets[pc1] = True
+            targets[pc2] = True
+
+    # 2. Merge consecutive chars
+    new_insts = []
+    old_to_new = {}
+
+    num_insts = len(instructions)
+    skip = 0
+    for i in range(num_insts):
+        if skip > 0:
+            skip -= 1
+            continue
+
+        old_to_new[i] = len(new_insts)
+        inst = instructions[i]
+        itype, val, pc1, pc2 = inst
+
+        if itype == OP_CHAR or itype == OP_CHAR_I:
+            # Try to merge runs of the same character type that are not jump targets
+            s = val
+            j = i + 1
+
+            # Simulation of while loop
+            for _ in range(num_insts - i - 1):
+                if j >= num_insts or (j in targets):
+                    break
+                next_inst = instructions[j]
+                if next_inst[0] == itype:
+                    s += next_inst[1]
+                    j += 1
+                else:
+                    break
+
+            if len(s) > 1:
+                new_type = OP_STRING if itype == OP_CHAR else OP_STRING_I
+                new_insts.append((new_type, s, None, None))
+                skip = j - i - 1
+                continue
+
+        new_insts.append(inst)
+
+    # Final "virtual" instruction for matches at the end
+    old_to_new[num_insts] = len(new_insts)
+
+    # Fill in holes in old_to_new (for merged instructions)
+    # Jumps to a merged instruction should go to the next valid instruction
+    # OR to the start of the merge. For now, let's map them to the next instruction.
+    for i in range(num_insts - 1, -1, -1):
+        if i not in old_to_new:
+            old_to_new[i] = old_to_new[i + 1]
+
+    # 3. Update PC offsets
+    final_insts = []
+    for inst in new_insts:
+        itype, val, pc1, pc2 = inst
+        new_pc1 = old_to_new[pc1] if pc1 != None else None
+        new_pc2 = old_to_new[pc2] if pc2 != None else None
+        final_insts.append((itype, val, new_pc1, new_pc2))
+
+    return final_insts
 
 # buildifier: disable=list-append
 def _build_alt_tree(instructions, group_ctx):
@@ -940,10 +1019,6 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
     reachable = []
     num_inst = len(instructions)
 
-    # Use a list for visited states.
-    # visited[pc] == visited_gen means visited in this generation.
-    visited[start_pc] = visited_gen
-
     # Thompson NFA: The first time we reach a PC, it's via the highest priority path.
     stack = [(start_pc, start_regs)]
 
@@ -961,94 +1036,66 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
         for _ in range(inner_limit):
             if pc >= num_inst:
                 break
+
+            # Deduplication: the first time we reach a state in this generation,
+            # it's via the highest-priority path currently available.
+            if visited[pc] == visited_gen:
+                # print("DEBUG: closure pc=%d ALREADY VISITED (gen=%d)" % (pc, visited_gen))
+                break
+            visited[pc] = visited_gen
+            # print("DEBUG: closure pc=%d visited" % pc)
+
             inst = instructions[pc]
             itype = inst[0]
 
             if itype == OP_SPLIT:
+                # Priority: pc1 then pc2. Push pc2 (lower priority) to stack.
                 pc1, pc2 = inst[2], inst[3]
-
-                # Branch 2 has lower priority. Push to stack for later.
-                if pc2 < num_inst and visited[pc2] != visited_gen:
-                    visited[pc2] = visited_gen
-
-                    # Must copy registers for the forked path.
-                    stack += [(pc2, regs[:])]
-
-                # Branch 1 has higher priority. Continue inner loop.
-                if pc1 < num_inst and visited[pc1] != visited_gen:
-                    visited[pc1] = visited_gen
-                    pc = pc1
+                if pc2 < num_inst:
+                    stack.append((pc2, regs[:]))
+                if pc1 < num_inst:
+                    pc = pc1  # Continue inner loop with higher priority
                 else:
-                    pc = num_inst  # Break inner
+                    break
             elif itype == OP_JUMP:
                 pc = inst[2]
-                if pc < num_inst and visited[pc] != visited_gen:
-                    visited[pc] = visited_gen
-                else:
-                    pc = num_inst  # Break inner
             elif itype == OP_SAVE:
-                # Optimized: update regs IN-PLACE since this thread owns this regs object.
-                # Safe because _process_batch and OP_SPLIT ensure we have a private copy.
                 reg_idx = inst[1]
                 regs[reg_idx] = current_idx
                 if reg_idx > 1 and reg_idx % 2 == 1:
                     regs[-1] = reg_idx // 2
-
                 pc += 1
-                if pc < num_inst and visited[pc] != visited_gen:
-                    visited[pc] = visited_gen
-                else:
-                    pc = num_inst  # Break inner
             elif itype == OP_ANCHOR_START:
                 if current_idx == 0:
                     pc += 1
-                    if pc < num_inst and visited[pc] != visited_gen:
-                        visited[pc] = visited_gen
-                    else:
-                        pc = num_inst
                 else:
-                    pc = num_inst
+                    break
             elif itype == OP_ANCHOR_END:
                 if current_idx == input_len:
                     pc += 1
-                    if pc < num_inst and visited[pc] != visited_gen:
-                        visited[pc] = visited_gen
-                    else:
-                        pc = num_inst
                 else:
-                    pc = num_inst
+                    break
             elif itype == OP_WORD_BOUNDARY or itype == OP_NOT_WORD_BOUNDARY:
                 is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
                 is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
                 match = (is_prev_word != is_curr_word) if itype == OP_WORD_BOUNDARY else (is_prev_word == is_curr_word)
                 if match:
                     pc += 1
-                    if pc < num_inst and visited[pc] != visited_gen:
-                        visited[pc] = visited_gen
-                    else:
-                        pc = num_inst
                 else:
-                    pc = num_inst
+                    break
             elif itype == OP_ANCHOR_LINE_START:
                 if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
                     pc += 1
-                    if pc < num_inst and visited[pc] != visited_gen:
-                        visited[pc] = visited_gen
-                    else:
-                        pc = num_inst
                 else:
-                    pc = num_inst
+                    break
             elif itype == OP_ANCHOR_LINE_END:
                 if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
                     pc += 1
-                    if pc < num_inst and visited[pc] != visited_gen:
-                        visited[pc] = visited_gen
-                    else:
-                        pc = num_inst
                 else:
-                    pc = num_inst
+                    break
             else:
-                # Not an epsilon instruction (e.g. OP_CHAR, OP_MATCH, OP_SET)
+                # Not an epsilon instruction (e.g. OP_CHAR, OP_MATCH, OP_SET, OP_STRING)
+                # print("DEBUG: closure reached non-epsilon pc=%d" % pc)
                 reachable += [(pc, regs)]
                 break
 
@@ -1056,29 +1103,52 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
 # buildifier: disable=list-append
 def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, input_len, visited, visited_gen):
-    next_threads_dict = {}
+    """Processes a batch of threads against the current character.
+
+    Returns (next_threads, match_regs, visited_gen).
+    """
+
+    next_threads_dict = {}  # pc -> regs (deduplication)
+    next_threads_list = []  # order preserved
     match_regs = None
 
-    for pc, regs in batch:
+    # Sort batch by rank to preserve priority
+    # Rank is a tuple: (start_index, nfa_order)
+    # Starlark sort is stable.
+    # Higher priority (lower rank) threads first.
+    sorted_batch = sorted(batch, key = lambda t: t[2])
+
+    for pc, regs, rank in sorted_batch:
         inst = instructions[pc]
         itype = inst[0]
 
         if itype == OP_MATCH:
             if match_regs == None:
                 match_regs = regs
-
-            # Any thread after this one in the batch has lower priority.
-            # Since we found a match, we can stop processing lower priority threads.
             break
 
-        if char == None:
+        if char == None and itype != OP_MATCH:
             continue
 
         match_found = False
+        target_idx = char_idx + 1
+
         if itype == OP_CHAR:
             match_found = (inst[1] == char)
         elif itype == OP_CHAR_I:
             match_found = (inst[1] == char_lower)
+        elif itype == OP_STRING:
+            s = inst[1]
+            s_len = len(s)
+            if input_str[char_idx:char_idx + s_len] == s:
+                match_found = True
+                target_idx = char_idx + s_len
+        elif itype == OP_STRING_I:
+            s_lower = inst[1]
+            s_len = len(s_lower)
+            if input_str[char_idx:char_idx + s_len].lower() == s_lower:
+                match_found = True
+                target_idx = char_idx + s_len
         elif itype == OP_ANY:
             match_found = True
         elif itype == OP_ANY_NO_NL:
@@ -1091,20 +1161,13 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
             match_found = (_char_in_set(set_struct, char_lower) != is_negated)
 
         if match_found:
-            # We must pass a COPY of regs because _get_epsilon_closure will modify it in-place.
-            visited_gen += 1
-            closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs[:], char_idx + 1, visited, visited_gen)
-            for c_pc, c_regs in closure:
-                if c_pc not in next_threads_dict:
-                    next_threads_dict[c_pc] = c_regs
+            # Important: just add the raw next pc.
+            # _execute_core will expand its epsilon closure at the correct char_idx.
+            if pc + 1 not in next_threads_dict:
+                next_threads_dict[pc + 1] = regs
+                next_threads_list += [(pc + 1, regs, rank, target_idx)]
 
-    # Convert dict back to list of (pc, regs)
-    # Dictionaries in Starlark (and Python 3.7+) preserve insertion order.
-    next_threads = []
-    for pc, regs in next_threads_dict.items():
-        next_threads += [(pc, regs)]
-
-    return next_threads, match_regs, visited_gen
+    return next_threads_list, match_regs, visited_gen
 
 # buildifier: disable=list-append
 def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False, has_case_insensitive = False):
@@ -1120,54 +1183,65 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
     visited = [0] * len(instructions)
     visited_gen = 1
 
-    # Current active threads: list of (pc, regs)
-    current_threads = _get_epsilon_closure(
-        instructions,
-        input_str,
-        input_len,
-        0,
-        initial_regs,
-        start_index,
-        visited,
-        visited_gen,
-    )
+    # future_threads maps target_idx -> list of (pc, regs, rank)
+    future_threads = {}
+
+    # Initialize with the start condition
+    # Rank is a tuple to maintain priority.
+    # Higher priority threads have lower rank (lexicographical).
+    future_threads[start_index] = [(0, initial_regs, (start_index,))]
 
     match_regs = None
 
     # Main Loop: Iterate over input string
-    # We go up to input_len inclusive to handle matches at the very end (like $)
     for char_idx in range(start_index, input_len + 1):
         char = input_str[char_idx] if char_idx < input_len else None
         char_lower = None
         if input_lower != None and char_idx < input_len:
             char_lower = input_lower[char_idx]
 
-        # Unanchored Search Injection
+        # 1. Get threads scheduled for this index
+        current_threads = []
+        visited_gen += 1
+
+        # Populate current_threads from future_threads
+        # Rank counter for re-normalization to prevent tuple explosion
+        rank_counter = 0
+
+        # Populate current_threads from future_threads
+        if char_idx in future_threads:
+            # Sort by rank to ensure priority is respected during epsilon closure expansion
+            pending = sorted(future_threads.pop(char_idx), key = lambda t: t[2])
+            for pc, regs, old_rank in pending:
+                # Call epsilon closure to expand this thread at the current index
+                closure = _get_epsilon_closure(instructions, input_str, input_len, pc, regs, char_idx, visited, visited_gen)
+
+                # Assign new ranks preserving start_index and using counter for relative priority
+                start_index = old_rank[0]
+                for c_pc, c_regs in closure:
+                    current_threads.append((c_pc, c_regs, (start_index, rank_counter)))
+                    rank_counter += 1
+
+        # 2. Unanchored Search Injection
         if not anchored:
-            # We must inject a start thread at EACH index (char_idx).
-            # To preserve leftmost priority, we only add a thread for PC 0 if
-            # we haven't already reached PC 0 in the current execution step.
+            # Check if PC 0 is already in visited for this generation
+            if visited[0] != visited_gen:
+                closure_pc0 = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs[:], char_idx, visited, visited_gen)
 
-            # The current_threads list is already sorted by priority.
-            # We can check if PC 0 is already in visited_this_step for the closure.
-            # Actually, start_closure is usually just (0, initial_regs) + epsilons.
+                # Unanchored start gets rank (char_idx, counter)
+                # Since char_idx is the start index for this new thread.
+                for c_pc, c_regs in closure_pc0:
+                    current_threads.append((c_pc, c_regs, (char_idx, rank_counter)))
+                    rank_counter += 1
 
-            # Optimization: only call closure for PC 0 if it's not already active.
-            found_pc0 = False
-            for pc, _ in current_threads:
-                if pc == 0:
-                    found_pc0 = True
-                    break
+        # Optimization: Stop early if no threads left
+        if not current_threads and not future_threads:
+            if match_regs or anchored or char_idx >= input_len:
+                break
 
-            if not found_pc0:
-                visited_gen += 1
-                start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx, visited, visited_gen)
-
-                # Simply append them, as they are lower priority than existing threads
-                current_threads += start_closure
-
-        # Process current threads against character
-        next_threads, batch_match, visited_gen = _process_batch(
+        # 3. Process current threads
+        # 3. Process current threads
+        res_future_list, batch_match, visited_gen = _process_batch(
             instructions,
             current_threads,
             char,
@@ -1180,29 +1254,16 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
         )
 
         if batch_match:
-            # Leftmost-longest matching:
-            # 1. Prefer earlier start position (leftmost).
-            # 2. For same start position, prefer later match (longest).
             if match_regs == None:
                 match_regs = batch_match
-            else:
-                # regs[0] is the start of the match
-                if batch_match[0] <= match_regs[0]:
-                    match_regs = batch_match
+            elif batch_match[0] <= match_regs[0]:
+                match_regs = batch_match
 
-        current_threads = next_threads
-
-        # Optimization: If no threads left, we can stop.
-        # But only if we are not doing unanchored search (which might inject more threads later).
-        # Actually, if we are doing unanchored search, we only stop if we have a match
-        # and no threads starting at or before that match's start are alive.
-        if not current_threads:
-            if match_regs:
-                # If we have a match, and no threads are alive, we are done.
-                # (Any new threads injected later would start later, so they'd be lower priority).
-                break
-            if anchored:
-                break
+        # 4. Schedule future matches
+        for pc, regs, rank, target_idx in res_future_list:
+            if target_idx not in future_threads:
+                future_threads[target_idx] = []
+            future_threads[target_idx] += [(pc, regs, rank)]
 
     return match_regs
 
@@ -1285,10 +1346,14 @@ def _optimize_matcher(instructions):
         if itype == OP_CHAR:
             prefix += instructions[idx][1]
             idx += 1
+        elif itype == OP_STRING:
+            prefix += instructions[idx][1]
+            idx += 1
         elif itype == OP_CHAR_I:
-            # We don't support mixed case prefix optimization easily yet
-            # because startswith is case-sensitive.
-            # But we can store that it's a case-insensitive prefix.
+            prefix += instructions[idx][1]
+            case_insensitive_prefix = True
+            idx += 1
+        elif itype == OP_STRING_I:
             prefix += instructions[idx][1]
             case_insensitive_prefix = True
             idx += 1
@@ -1374,11 +1439,9 @@ def _optimize_matcher(instructions):
         if itype == OP_CHAR:
             suffix += instructions[idx][1]
             idx += 1
-        elif itype == OP_CHAR_I:
-            # For now, we only support suffix optimization for case-sensitive
-            # unless the whole pattern is case-insensitive prefix (tricky).
-            # Let's just break and not optimize suffix if mixed case.
-            break
+        elif itype == OP_STRING:
+            suffix += instructions[idx][1]
+            idx += 1
         else:
             break
 
