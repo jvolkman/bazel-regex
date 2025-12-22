@@ -139,6 +139,7 @@ _SIMPLE_ESCAPES = {
     "a": "\007",
 }
 
+# buildifier: disable=list-append
 def _make_set_struct(char_set, case_insensitive = False):
     """Creates a struct for a character set, with mixed-case expansion if needed."""
     all_chars_list = []
@@ -153,7 +154,7 @@ def _make_set_struct(char_set, case_insensitive = False):
             if item[0] == "not":
                 # For negated POSIX classes, we can't easily expand into all_chars
                 # Just keep it as a raw item
-                processed_items.append(item)
+                processed_items += [item]
                 continue
 
             start_code = _ord(item[0])
@@ -162,17 +163,17 @@ def _make_set_struct(char_set, case_insensitive = False):
             if case_insensitive:
                 # Only need lowercase since matches are against char_lower
                 for code in range(start_code, end_code + 1):
-                    all_chars_list.append(_chr(code).lower())
+                    all_chars_list += [_chr(code).lower()]
             else:
                 for code in range(start_code, end_code + 1):
-                    all_chars_list.append(_chr(code))
-            processed_items.append(item)
+                    all_chars_list += [_chr(code)]
+            processed_items += [item]
         else:
             if case_insensitive:
-                all_chars_list.append(item.lower())
+                all_chars_list += [item.lower()]
             else:
-                all_chars_list.append(item)
-            processed_items.append(item)
+                all_chars_list += [item]
+            processed_items += [item]
 
     # Deduplicate all_chars_list and build string
     all_chars_str = ""
@@ -505,7 +506,7 @@ def _compile_regex(pattern, start_group_id = 0):
                 if is_capturing:
                     group_count += 1
                     gid = group_count
-                    instructions += [(OP_SAVE, gid * 2, None, None)]  # buildifier: disable=list-append
+                    instructions += [(OP_SAVE, gid * 2, None, None)]
                     if group_name:
                         named_groups[group_name] = gid
 
@@ -517,7 +518,7 @@ def _compile_regex(pattern, start_group_id = 0):
                     "branch_starts": [len(instructions)],
                     "exit_jumps": [],
                     "flags": saved_flags,
-                }]  # buildifier: disable=list-append
+                }]
 
         elif char == ")":
             if stack:
@@ -902,17 +903,19 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             # Branch 2 (pc2) has lower priority
             if pc2 not in visited:
                 visited[pc2] = True
-                stack.append((pc2, list(regs)))
+                stack += [(pc2, list(regs))]  # buildifier: disable=list-plus
 
             # Branch 1 (inst[2]) has higher priority
             if pc1 not in visited:
                 visited[pc1] = True
-                stack.append((pc1, regs))  # Reuse regs for highest priority path
+                stack += [(pc1, regs)]  # buildifier: disable=list-plus
+
+            # Reuse regs for highest priority path
         elif itype == OP_JUMP:
             npc = inst[2]
             if npc not in visited:
                 visited[npc] = True
-                stack.append((npc, regs))
+                stack += [(npc, regs)]  # buildifier: disable=list-plus
         elif itype == OP_SAVE:
             npc = pc + 1
             if npc not in visited:
@@ -922,19 +925,19 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 new_regs[reg_idx] = current_idx
                 if reg_idx > 1 and reg_idx % 2 == 1:
                     new_regs[-1] = reg_idx // 2
-                stack.append((npc, new_regs))
+                stack += [(npc, new_regs)]  # buildifier: disable=list-plus
         elif itype == OP_ANCHOR_START:
             if current_idx == 0:
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         elif itype == OP_ANCHOR_END:
             if current_idx == input_len:
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         elif itype == OP_WORD_BOUNDARY:
             is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
             is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
@@ -942,7 +945,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         elif itype == OP_NOT_WORD_BOUNDARY:
             is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
             is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
@@ -950,22 +953,22 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         elif itype == OP_ANCHOR_LINE_START:
             if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         elif itype == OP_ANCHOR_LINE_END:
             if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
                 npc = pc + 1
                 if npc not in visited:
                     visited[npc] = True
-                    stack.append((npc, regs))
+                    stack += [(npc, regs)]
         else:
             # Not an epsilon instruction
-            reachable.append((pc, regs))
+            reachable += [(pc, regs)]  # buildifier: disable=list-plus
 
     return reachable
 
@@ -1086,7 +1089,7 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
 
             # The current_threads list is already sorted by priority.
             # We can check if PC 0 is already in visited_this_step for the closure.
-            # However, start_closure is usually just (0, initial_regs) + epsilons.
+            # Actually, start_closure is usually just (0, initial_regs) + epsilons.
 
             # Optimization: only call closure for PC 0 if it's not already active.
             found_pc0 = False
