@@ -873,83 +873,99 @@ def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
 # buildifier: disable=list-append
 def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx):
     reachable = []
-    stack = [(start_pc, start_regs)]
+
+    # PC is visited if it's already in visited OR it's already in the stack.
+    # To keep it simple and correct for Thompson priority, we use a single visited set.
     visited = {}
 
-    # Standard NFA epsilon closure: each PC is visited at most once.
-    # The first time we reach a PC, it's via the highest priority path.
-    limit = len(instructions) + 10
+    # Thompson NFA: The first time we reach a PC in an epsilon closure,
+    # it's the highest priority route to that PC.
+    stack = [(start_pc, start_regs)]
+    visited[start_pc] = True
 
+    num_inst = len(instructions)
+
+    # Limit to prevent infinite epsilon loops (though bytecode should be safe)
+    limit = num_inst + 20
     for _ in range(limit):
         if not stack:
             break
         pc, regs = stack.pop()
-        if pc >= len(instructions) or pc < 0:
-            continue
-
-        if pc in visited:
-            continue
-        visited[pc] = True
 
         inst = instructions[pc]
         itype = inst[0]
 
         if itype == OP_SPLIT:
-            stack += [(inst[3], list(regs))]
-            stack += [(inst[2], list(regs))]
-        elif itype == OP_JUMP:
-            stack += [(inst[2], list(regs))]
-        elif itype == OP_SAVE:
-            new_regs = list(regs)
-            reg_idx = inst[1]
-            new_regs[reg_idx] = current_idx
+            pc1 = inst[2]
+            pc2 = inst[3]
 
-            # If it's a group end (odd index) and not group 0, track it as lastindex
-            if reg_idx > 1 and reg_idx % 2 == 1:
-                new_regs[-1] = reg_idx // 2
-            stack += [(pc + 1, new_regs)]
+            # Branch 2 (pc2) has lower priority
+            if pc2 not in visited:
+                visited[pc2] = True
+                stack.append((pc2, list(regs)))
+
+            # Branch 1 (inst[2]) has higher priority
+            if pc1 not in visited:
+                visited[pc1] = True
+                stack.append((pc1, regs))  # Reuse regs for highest priority path
+        elif itype == OP_JUMP:
+            npc = inst[2]
+            if npc not in visited:
+                visited[npc] = True
+                stack.append((npc, regs))
+        elif itype == OP_SAVE:
+            npc = pc + 1
+            if npc not in visited:
+                visited[npc] = True
+                new_regs = list(regs)
+                reg_idx = inst[1]
+                new_regs[reg_idx] = current_idx
+                if reg_idx > 1 and reg_idx % 2 == 1:
+                    new_regs[-1] = reg_idx // 2
+                stack.append((npc, new_regs))
         elif itype == OP_ANCHOR_START:
             if current_idx == 0:
-                stack += [(pc + 1, list(regs))]
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         elif itype == OP_ANCHOR_END:
             if current_idx == input_len:
-                stack += [(pc + 1, list(regs))]
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         elif itype == OP_WORD_BOUNDARY:
-            is_prev_word = False
-            if current_idx > 0:
-                is_prev_word = _is_word_char(input_str[current_idx - 1])
-            is_curr_word = False
-            if current_idx < input_len:
-                is_curr_word = _is_word_char(input_str[current_idx])
+            is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
+            is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
             if is_prev_word != is_curr_word:
-                stack += [(pc + 1, list(regs))]
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         elif itype == OP_NOT_WORD_BOUNDARY:
-            is_prev_word = False
-            if current_idx > 0:
-                is_prev_word = _is_word_char(input_str[current_idx - 1])
-            is_curr_word = False
-            if current_idx < input_len:
-                is_curr_word = _is_word_char(input_str[current_idx])
+            is_prev_word = (current_idx > 0 and _is_word_char(input_str[current_idx - 1]))
+            is_curr_word = (current_idx < input_len and _is_word_char(input_str[current_idx]))
             if is_prev_word == is_curr_word:
-                stack += [(pc + 1, list(regs))]
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         elif itype == OP_ANCHOR_LINE_START:
-            matched = False
-            if current_idx == 0:
-                matched = True
-            elif current_idx > 0 and input_str[current_idx - 1] == "\n":
-                matched = True
-            if matched:
-                stack += [(pc + 1, list(regs))]
+            if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         elif itype == OP_ANCHOR_LINE_END:
-            matched = False
-            if current_idx == input_len:
-                matched = True
-            elif current_idx < input_len and input_str[current_idx] == "\n":
-                matched = True
-            if matched:
-                stack += [(pc + 1, list(regs))]
+            if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
+                npc = pc + 1
+                if npc not in visited:
+                    visited[npc] = True
+                    stack.append((npc, regs))
         else:
-            reachable += [(pc, regs)]
+            # Not an epsilon instruction
+            reachable.append((pc, regs))
 
     return reachable
 
@@ -1063,22 +1079,27 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
             char_lower = input_lower[char_idx]
 
         # Unanchored Search Injection
-        if not anchored and char_idx <= input_len:
-            start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx)
+        if not anchored:
+            # We must inject a start thread at EACH index (char_idx).
+            # To preserve leftmost priority, we only add a thread for PC 0 if
+            # we haven't already reached PC 0 in the current execution step.
 
-            # Deduplicate by PC, preserving existing threads (higher priority)
-            threads_dict = {}
-            for pc, regs in current_threads:
-                threads_dict[pc] = regs
+            # The current_threads list is already sorted by priority.
+            # We can check if PC 0 is already in visited_this_step for the closure.
+            # However, start_closure is usually just (0, initial_regs) + epsilons.
 
-            for pc, regs in start_closure:
-                if pc not in threads_dict:
-                    threads_dict[pc] = regs
+            # Optimization: only call closure for PC 0 if it's not already active.
+            found_pc0 = False
+            for pc, _ in current_threads:
+                if pc == 0:
+                    found_pc0 = True
+                    break
 
-            # Rebuild current_threads
-            current_threads = []
-            for pc, regs in threads_dict.items():
-                current_threads += [(pc, regs)]
+            if not found_pc0:
+                start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx)
+
+                # Simply append them, as they are lower priority than existing threads
+                current_threads += start_closure
 
         # Process current threads against character
         next_threads, batch_match = _process_batch(
