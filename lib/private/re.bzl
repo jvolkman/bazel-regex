@@ -1605,12 +1605,9 @@ def search(pattern, text):
     bytecode = compiled.bytecode
     group_count = compiled.group_count
     has_case_insensitive = compiled.has_case_insensitive
+    opt = compiled.opt
 
-    regs = _search_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
-    if not regs:
-        return None
-
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _search_bytecode(bytecode, text, compiled.named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
 
 def match(pattern, text):
     """Try to apply the pattern at the start of the string.
