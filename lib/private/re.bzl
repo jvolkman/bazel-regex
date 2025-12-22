@@ -953,6 +953,29 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
     return reachable
 
+def _char_in_set(set_struct, c):
+    """Checks if character c is in the set_struct.raw definition."""
+    for item in set_struct.raw:
+        if type(item) == "tuple":
+            if item[0] == "not":
+                # Negated POSIX class inside []
+                in_pset = False
+                for pitem in item[1]:
+                    if type(pitem) == "tuple":
+                        if c >= pitem[0] and c <= pitem[1]:
+                            in_pset = True
+                            break
+                    elif c == pitem:
+                        in_pset = True
+                        break
+                if not in_pset:
+                    return True
+            elif c >= item[0] and c <= item[1]:
+                return True
+        elif c == item:
+            return True
+    return False
+
 def _check_simple_match(inst, char, char_lower):
     itype = inst[0]
     if itype == OP_CHAR:
@@ -965,56 +988,10 @@ def _check_simple_match(inst, char, char_lower):
         return char != "\n"
     elif itype == OP_SET:
         set_struct, is_negated = inst[1]
-        in_set = False
-        for item in set_struct.raw:
-            if type(item) == "tuple":
-                if item[0] == "not":
-                    # Negated POSIX class inside []
-                    in_pset = False
-                    for pitem in item[1]:
-                        if type(pitem) == "tuple":
-                            if char >= pitem[0] and char <= pitem[1]:
-                                in_pset = True
-                                break
-                        elif char == pitem:
-                            in_pset = True
-                            break
-                    if not in_pset:
-                        in_set = True
-                        break
-                elif char >= item[0] and char <= item[1]:
-                    in_set = True
-                    break
-            elif char == item:
-                in_set = True
-                break
-        return (in_set != is_negated)
+        return (_char_in_set(set_struct, char) != is_negated)
     elif itype == OP_SET_I:
         set_struct, is_negated = inst[1]
-        in_set = False
-        for item in set_struct.raw:
-            if type(item) == "tuple":
-                if item[0] == "not":
-                    # Negated POSIX class inside []
-                    in_pset = False
-                    for pitem in item[1]:
-                        if type(pitem) == "tuple":
-                            if char_lower >= pitem[0] and char_lower <= pitem[1]:
-                                in_pset = True
-                                break
-                        elif char_lower == pitem:
-                            in_pset = True
-                            break
-                    if not in_pset:
-                        in_set = True
-                        break
-                elif char_lower >= item[0] and char_lower <= item[1]:
-                    in_set = True
-                    break
-            elif char_lower == item:
-                in_set = True
-                break
-        return (in_set != is_negated)
+        return (_char_in_set(set_struct, char_lower) != is_negated)
     return False
 
 # buildifier: disable=list-append
