@@ -1260,41 +1260,68 @@ def _optimize_matcher(instructions):
 
     if idx < len(instructions):
         itype = instructions[idx][0]
-        if itype in [OP_SET, OP_SET_I]:
-            set_data, is_negated = instructions[idx][1]
-            if not is_negated:
-                # Case 1: [set]+ -> SET, SPLIT(idx, idx+2)
-                if idx + 1 < len(instructions) and instructions[idx + 1][0] == OP_SPLIT and instructions[idx + 1][2] == idx and instructions[idx + 1][3] == idx + 2:
-                    prefix_set_chars = set_data.all_chars
-                    greedy_set_chars = set_data.all_chars
-                    idx += 2
+        if itype in [OP_CHAR, OP_CHAR_I, OP_SET, OP_SET_I]:
+            # Case 1: [set]+ or c+ -> ATOM, SPLIT(idx, idx+2)
+            if idx + 1 < len(instructions) and instructions[idx + 1][0] == OP_SPLIT and instructions[idx + 1][2] == idx and instructions[idx + 1][3] == idx + 2:
+                chars = None
+                if itype in [OP_CHAR, OP_CHAR_I]:
+                    chars = instructions[idx][1]
                 else:
-                    # Case 2: Just a match-one prefix set [set]
+                    set_data, is_negated = instructions[idx][1]
+                    if not is_negated:
+                        chars = set_data.all_chars
+
+                if chars != None:
+                    prefix_set_chars = chars
+                    greedy_set_chars = chars
+                    idx += 2
+            elif itype in [OP_SET, OP_SET_I]:
+                # Case 2: Just a match-one prefix set [set]
+                set_data, is_negated = instructions[idx][1]
+                if not is_negated:
                     prefix_set_chars = set_data.all_chars
                     idx += 1
+            else:
+                # Just a single char, already handled by prefix literal collector above if it was at start
+                pass
+
         elif itype == OP_SPLIT:
-            # Case 3: [set]* loop -> SPLIT(idx+1, idx+3), SET, JUMP idx
+            # Case 3: [set]* or c* loop -> SPLIT(idx+1, idx+3), ATOM, JUMP idx
             if idx + 2 < len(instructions) and instructions[idx][2] == idx + 1 and instructions[idx][3] == idx + 3:
-                set_inst = instructions[idx + 1]
+                atom_inst = instructions[idx + 1]
                 jump_inst = instructions[idx + 2]
-                if set_inst[0] in [OP_SET, OP_SET_I] and jump_inst[0] == OP_JUMP and jump_inst[2] == idx:
-                    set_data, is_negated = set_inst[1]
-                    if not is_negated:
-                        greedy_set_chars = set_data.all_chars
+                if jump_inst[0] == OP_JUMP and jump_inst[2] == idx:
+                    chars = None
+                    if atom_inst[0] in [OP_CHAR, OP_CHAR_I]:
+                        chars = atom_inst[1]
+                    elif atom_inst[0] in [OP_SET, OP_SET_I]:
+                        set_data, is_negated = atom_inst[1]
+                        if not is_negated:
+                            chars = set_data.all_chars
+
+                    if chars != None:
+                        greedy_set_chars = chars
                         idx += 3
 
     # If we have a prefix_set but no greedy_set yet, check if a greedy_set follows
     # Example: ^\d\w*
     if prefix_set_chars != None and greedy_set_chars == None:
         if idx < len(instructions) and instructions[idx][0] == OP_SPLIT:
-            # Check for * loop: SPLIT(idx+1, idx+3), SET, JUMP idx
+            # Check for * loop: SPLIT(idx+1, idx+3), ATOM, JUMP idx
             if idx + 2 < len(instructions) and instructions[idx][2] == idx + 1 and instructions[idx][3] == idx + 3:
-                set_inst = instructions[idx + 1]
+                atom_inst = instructions[idx + 1]
                 jump_inst = instructions[idx + 2]
-                if set_inst[0] in [OP_SET, OP_SET_I] and jump_inst[0] == OP_JUMP and jump_inst[2] == idx:
-                    set_data, is_negated = set_inst[1]
-                    if not is_negated:
-                        greedy_set_chars = set_data.all_chars
+                if jump_inst[0] == OP_JUMP and jump_inst[2] == idx:
+                    chars = None
+                    if atom_inst[0] in [OP_CHAR, OP_CHAR_I]:
+                        chars = atom_inst[1]
+                    elif atom_inst[0] in [OP_SET, OP_SET_I]:
+                        set_data, is_negated = atom_inst[1]
+                        if not is_negated:
+                            chars = set_data.all_chars
+
+                    if chars != None:
+                        greedy_set_chars = chars
                         idx += 3
 
     # Collect suffix literals
@@ -1351,12 +1378,12 @@ def _fullmatch_regs(bytecode, text, group_count, start_index = 0, has_case_insen
         return None
     return regs
 
-def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+def _search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, has_case_insensitive = False, opt = None):
     # Fast path optimization
     if opt and not has_case_insensitive:
         if opt.is_anchored_start:
             # If anchored at start, search is just match
-            return _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+            return _match_bytecode(bytecode, text, named_groups, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive, opt = opt)
 
         if opt.is_anchored_end:
             # Case: ...sets...suffix$
@@ -1401,11 +1428,11 @@ def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensi
                             has_case_insensitive = has_case_insensitive,
                             opt = opt,
                         )
-                        return _MatchObject(text, regs, compiled, 0, len(text))
+                        return _MatchObject(text, regs, compiled, start_index, len(text))
 
-        # General case search optimization: skipping to prefix
+        # General case search optimization: skipping to prefix or suffix
         if opt.prefix != "":
-            start_off = 0
+            start_off = start_index
 
             # We can use find() to skip to the first potential match
             for _ in range(len(text)):  # Loop for find() calls
@@ -1413,17 +1440,8 @@ def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensi
                 if found_idx == -1:
                     break
 
-                # Try a match at this position
-                # We can call _match_bytecode on the slice
-                # but we need to adjust the regs.
-                # Easier: just call _match_regs from here?
-                # No, let's keep it simple: if there's a prefix, we use find() to bound _search_regs
-                # Actually, if the pattern is simple enough for 'opt', we can just execute the rest of the fast path.
-
-                # Simplified for now: just use the prefix to skip in _search_regs
-                # Wait, I don't have a way to pass a start_index to _search_regs yet easily that is used by _execute.
-                # Actually, I do: start_index.
-                regs = _search_regs(bytecode, text, group_count, start_index = found_idx, has_case_insensitive = has_case_insensitive)
+                # For unanchored search with prefix literal, simple skip:
+                regs = _match_regs(bytecode, text, group_count, start_index = found_idx, has_case_insensitive = has_case_insensitive)
                 if regs:
                     compiled = struct(
                         bytecode = bytecode,
@@ -1433,16 +1451,52 @@ def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensi
                         has_case_insensitive = has_case_insensitive,
                         opt = opt,
                     )
-                    return _MatchObject(text, regs, compiled, 0, len(text))
+                    return _MatchObject(text, regs, compiled, start_index, len(text))
 
                 # If match failed at found_idx, skip it and look for next prefix
+                start_off = found_idx + 1
+                if start_off > len(text):
+                    break
+        elif opt.suffix != "":
+            start_off = start_index
+            for _ in range(len(text)):
+                found_idx = text.find(opt.suffix, start_off)
+                if found_idx == -1:
+                    break
+
+                # The leftmost match must start after start_index.
+                search_start = found_idx
+                if opt.greedy_set_chars != None:
+                    # Find furthest back we can go with these chars from this suffix point
+                    prefix_data = text[start_index:found_idx]
+                    stripped = prefix_data.rstrip(opt.greedy_set_chars)
+                    search_start = start_index + len(stripped)
+
+                if opt.prefix_set_chars != None:
+                    if search_start > start_index and text[search_start - 1] in opt.prefix_set_chars:
+                        search_start -= 1
+
+                # Now try a real search starting at search_start
+                regs = _match_regs(bytecode, text, group_count, start_index = search_start, has_case_insensitive = has_case_insensitive)
+                if regs:
+                    compiled = struct(
+                        bytecode = bytecode,
+                        named_groups = named_groups,
+                        group_count = group_count,
+                        pattern = None,
+                        has_case_insensitive = has_case_insensitive,
+                        opt = opt,
+                    )
+                    return _MatchObject(text, regs, compiled, start_index, len(text))
+
+                # If no match found yet, move past this suffix
                 start_off = found_idx + 1
                 if start_off > len(text):
                     break
 
             return None
 
-    regs = _search_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
+    regs = _search_regs(bytecode, text, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1453,14 +1507,14 @@ def _search_bytecode(bytecode, text, named_groups, group_count, has_case_insensi
         has_case_insensitive = has_case_insensitive,
         opt = opt,
     )
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _MatchObject(text, regs, compiled, start_index, len(text))
 
-def _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+def _match_bytecode(bytecode, text, named_groups, group_count, start_index = 0, has_case_insensitive = False, opt = None):
     # Fast path optimization
     if opt and not has_case_insensitive:
         # Simple anchored prefix match
-        if text.startswith(opt.prefix):
-            match_end = len(opt.prefix)
+        if text.startswith(opt.prefix, start_index):
+            match_end = start_index + len(opt.prefix)
             fast_path_ok = True
 
             # 1. Match prefix_set_chars (exactly once)
@@ -1518,7 +1572,7 @@ def _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensit
 
             if fast_path_ok:
                 regs = [-1] * ((group_count + 1) * 2 + 1)
-                regs[0] = 0
+                regs[0] = start_index
                 regs[1] = match_end
                 compiled = struct(
                     bytecode = bytecode,
@@ -1528,9 +1582,9 @@ def _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensit
                     has_case_insensitive = has_case_insensitive,
                     opt = opt,
                 )
-                return _MatchObject(text, regs, compiled, 0, len(text))
+                return _MatchObject(text, regs, compiled, start_index, len(text))
 
-    regs = _match_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
+    regs = _match_regs(bytecode, text, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1541,15 +1595,15 @@ def _match_bytecode(bytecode, text, named_groups, group_count, has_case_insensit
         has_case_insensitive = has_case_insensitive,
         opt = opt,
     )
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _MatchObject(text, regs, compiled, start_index, len(text))
 
-def _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = False, opt = None):
+def _fullmatch_bytecode(bytecode, text, named_groups, group_count, start_index = 0, has_case_insensitive = False, opt = None):
     # Fast path optimization
     if opt and not has_case_insensitive:
-        # fullmatch() MUST match the entire string.
+        # fullmatch() MUST match the entire string from start_index.
         # So it behaves like it has an implicit $ anchor.
-        if text.startswith(opt.prefix) and text.endswith(opt.suffix):
-            match_end = len(opt.prefix)
+        if text.startswith(opt.prefix, start_index) and text.endswith(opt.suffix):
+            match_end = start_index + len(opt.prefix)
             fast_path_ok = True
 
             if opt.prefix_set_chars != None:
@@ -1577,7 +1631,7 @@ def _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_inse
 
             if fast_path_ok and match_end == len(text):
                 regs = [-1] * ((group_count + 1) * 2 + 1)
-                regs[0] = 0
+                regs[0] = start_index
                 regs[1] = match_end
                 compiled = struct(
                     bytecode = bytecode,
@@ -1587,9 +1641,9 @@ def _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_inse
                     has_case_insensitive = has_case_insensitive,
                     opt = opt,
                 )
-                return _MatchObject(text, regs, compiled, 0, len(text))
+                return _MatchObject(text, regs, compiled, start_index, len(text))
 
-    regs = _fullmatch_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
+    regs = _fullmatch_regs(bytecode, text, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive)
     if not regs:
         return None
     compiled = struct(
@@ -1600,7 +1654,7 @@ def _fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_inse
         has_case_insensitive = has_case_insensitive,
         opt = opt,
     )
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _MatchObject(text, regs, compiled, start_index, len(text))
 
 def compile(pattern):
     """Compiles a regex pattern into a reusable object.
@@ -1650,12 +1704,7 @@ def search(pattern, text):
       or None if no match was found.
     """
     compiled = compile(pattern)
-    bytecode = compiled.bytecode
-    group_count = compiled.group_count
-    has_case_insensitive = compiled.has_case_insensitive
-    opt = compiled.opt
-
-    return _search_bytecode(bytecode, text, compiled.named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+    return _search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
 def match(pattern, text):
     """Try to apply the pattern at the start of the string.
@@ -1669,12 +1718,7 @@ def match(pattern, text):
       or None if no match was found.
     """
     compiled = compile(pattern)
-    bytecode = compiled.bytecode
-    group_count = compiled.group_count
-    has_case_insensitive = compiled.has_case_insensitive
-    opt = compiled.opt
-
-    return _match_bytecode(bytecode, text, compiled.named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+    return _match_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
 def fullmatch(pattern, text):
     """Try to apply the pattern to the entire string.
@@ -1688,15 +1732,7 @@ def fullmatch(pattern, text):
       or None if no match was found.
     """
     compiled = compile(pattern)
-    bytecode = compiled.bytecode
-    group_count = compiled.group_count
-    has_case_insensitive = compiled.has_case_insensitive
-
-    regs = _fullmatch_regs(bytecode, text, group_count, has_case_insensitive = has_case_insensitive)
-    if not regs:
-        return None
-
-    return _MatchObject(text, regs, compiled, 0, len(text))
+    return _fullmatch_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
 # buildifier: disable=list-append
 def findall(pattern, text):
@@ -1713,23 +1749,20 @@ def findall(pattern, text):
       A list of matching strings or tuples of matching groups.
     """
     compiled = compile(pattern)
-    bytecode = compiled.bytecode
     group_count = compiled.group_count
-    num_regs = (group_count + 1) * 2
-
     matches = []
     start_index = 0
     text_len = len(text)
 
-    # Starlark doesn't support while loops, so we use a large range
+    # Simulate while loop
     # Max possible matches is len(text) + 1 (for empty matches)
     for _ in range(text_len + 2):
-        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
-        if not regs:
+        m = _search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+        if not m:
             break
 
-        match_start = regs[0]
-        match_end = regs[1]
+        match_start = m.start()
+        match_end = m.end()
 
         if match_start == -1:
             # Should not happen if execute returns non-None
@@ -1740,18 +1773,7 @@ def findall(pattern, text):
             matches += [text[match_start:match_end]]
         else:
             # Return groups
-            groups = []
-            for i in range(1, group_count + 1):
-                g_start = regs[i * 2]
-                g_end = regs[i * 2 + 1]
-                if g_start != -1 and g_end != -1:
-                    groups += [text[g_start:g_end]]
-                else:
-                    groups += [None]
-
-            # Starlark doesn't have tuples in the same way, return tuple-like list or tuple
-            # Using tuple() to match Python behavior closer if possible, or just list
-            matches += [tuple(groups)]
+            matches += [m.groups(default = None)]
 
         # Advance start_index
         if match_end > match_start:
@@ -1863,10 +1885,6 @@ def sub(pattern, repl, text, count = 0):
     # So we duplicate the loop here or refactor findall to return match objects.
     # Let's duplicate loop for now to avoid breaking findall API.
 
-    bytecode = compiled.bytecode
-    group_count = compiled.group_count
-    num_regs = (group_count + 1) * 2
-
     res_parts = []
     last_idx = 0
     start_index = 0
@@ -1878,15 +1896,12 @@ def sub(pattern, repl, text, count = 0):
         if count > 0 and matches_found >= count:
             break
 
-        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
-        if not regs:
+        m = _search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+        if not m:
             break
 
-        match_start = regs[0]
-        match_end = regs[1]
-
-        if match_start == -1:
-            break
+        match_start = m.start()
+        match_end = m.end()
 
         # Append text before match
         res_parts += [text[last_idx:match_start]]
@@ -1894,19 +1909,11 @@ def sub(pattern, repl, text, count = 0):
         # Calculate replacement
         match_str = text[match_start:match_end]
 
-        groups = []
-        for i in range(1, group_count + 1):
-            g_start = regs[i * 2]
-            g_end = regs[i * 2 + 1]
-            if g_start != -1 and g_end != -1:
-                groups += [text[g_start:g_end]]
-            else:
-                groups += [None]
+        groups = m.groups(default = None)
 
         if type(repl) == "function":
-            # Pass a match object (dict with methods)
-            match_obj = _MatchObject(text, regs, compiled, match_start, match_end)
-            replacement = repl(match_obj)
+            # m is already a MatchObject-like struct
+            replacement = repl(m)
         else:
             replacement = _expand_replacement(repl, match_str, groups, compiled.named_groups)
 
@@ -1942,10 +1949,6 @@ def split(pattern, text, maxsplit = 0):
     """
 
     compiled = compile(pattern)
-    bytecode = compiled.bytecode
-    group_count = compiled.group_count
-    num_regs = (group_count + 1) * 2
-
     res_parts = []
     last_idx = 0
     start_index = 0
@@ -1957,12 +1960,12 @@ def split(pattern, text, maxsplit = 0):
         if maxsplit > 0 and splits_found >= maxsplit:
             break
 
-        regs = _execute(bytecode, text, num_regs, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive)
-        if not regs:
+        m = _search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = start_index, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+        if not m:
             break
 
-        match_start = regs[0]
-        match_end = regs[1]
+        match_start = m.start()
+        match_end = m.end()
 
         if match_start == -1:
             break
@@ -1971,14 +1974,9 @@ def split(pattern, text, maxsplit = 0):
         res_parts += [text[last_idx:match_start]]
 
         # If capturing groups, append them too (Python behavior)
-        if group_count > 0:
-            for i in range(1, group_count + 1):
-                g_start = regs[i * 2]
-                g_end = regs[i * 2 + 1]
-                if g_start != -1 and g_end != -1:
-                    res_parts += [text[g_start:g_end]]
-                else:
-                    res_parts += [None]
+        if compiled.group_count > 0:
+            for i in range(1, compiled.group_count + 1):
+                res_parts += [m.group(i)]
 
         last_idx = match_end
         splits_found += 1
