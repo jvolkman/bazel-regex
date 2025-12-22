@@ -180,13 +180,14 @@ def _new_set_builder(case_insensitive = False):
 
     def build():
         # Deduplicate for all_chars_str
-        all_chars_str = ""
+        all_chars_val = []
         seen_str = {}
         for c in state["all_chars_list"]:
             if c not in seen_str:
                 seen_str[c] = True
-                if len(all_chars_str) < ALL_CHARS_STR_LIMIT:
-                    all_chars_str += c
+                if len(all_chars_val) < ALL_CHARS_STR_LIMIT:
+                    all_chars_val += [c]
+        all_chars_str = "".join(all_chars_val)
 
         return struct(
             lookup = state["lookup"],
@@ -905,14 +906,13 @@ def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
         return i
 
 # buildifier: disable=list-append
-def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx):
+def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx, visited, visited_gen):
     reachable = []
     num_inst = len(instructions)
 
-    # Use a list for visited states. 0 = not visited, 1 = visited.
-    # List access by index is very fast in Starlark.
-    visited = [0] * num_inst
-    visited[start_pc] = 1
+    # Use a list for visited states.
+    # visited[pc] == visited_gen means visited in this generation.
+    visited[start_pc] = visited_gen
 
     # Thompson NFA: The first time we reach a PC, it's via the highest priority path.
     stack = [(start_pc, start_regs)]
@@ -938,22 +938,22 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 pc1, pc2 = inst[2], inst[3]
 
                 # Branch 2 has lower priority. Push to stack for later.
-                if pc2 < num_inst and not visited[pc2]:
-                    visited[pc2] = 1
+                if pc2 < num_inst and visited[pc2] != visited_gen:
+                    visited[pc2] = visited_gen
 
                     # Must copy registers for the forked path.
                     stack += [(pc2, regs[:])]
 
                 # Branch 1 has higher priority. Continue inner loop.
-                if pc1 < num_inst and not visited[pc1]:
-                    visited[pc1] = 1
+                if pc1 < num_inst and visited[pc1] != visited_gen:
+                    visited[pc1] = visited_gen
                     pc = pc1
                 else:
                     pc = num_inst  # Break inner
             elif itype == OP_JUMP:
                 pc = inst[2]
-                if pc < num_inst and not visited[pc]:
-                    visited[pc] = 1
+                if pc < num_inst and visited[pc] != visited_gen:
+                    visited[pc] = visited_gen
                 else:
                     pc = num_inst  # Break inner
             elif itype == OP_SAVE:
@@ -965,15 +965,15 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     regs[-1] = reg_idx // 2
 
                 pc += 1
-                if pc < num_inst and not visited[pc]:
-                    visited[pc] = 1
+                if pc < num_inst and visited[pc] != visited_gen:
+                    visited[pc] = visited_gen
                 else:
                     pc = num_inst  # Break inner
             elif itype == OP_ANCHOR_START:
                 if current_idx == 0:
                     pc += 1
-                    if pc < num_inst and not visited[pc]:
-                        visited[pc] = 1
+                    if pc < num_inst and visited[pc] != visited_gen:
+                        visited[pc] = visited_gen
                     else:
                         pc = num_inst
                 else:
@@ -981,8 +981,8 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             elif itype == OP_ANCHOR_END:
                 if current_idx == input_len:
                     pc += 1
-                    if pc < num_inst and not visited[pc]:
-                        visited[pc] = 1
+                    if pc < num_inst and visited[pc] != visited_gen:
+                        visited[pc] = visited_gen
                     else:
                         pc = num_inst
                 else:
@@ -993,8 +993,8 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 match = (is_prev_word != is_curr_word) if itype == OP_WORD_BOUNDARY else (is_prev_word == is_curr_word)
                 if match:
                     pc += 1
-                    if pc < num_inst and not visited[pc]:
-                        visited[pc] = 1
+                    if pc < num_inst and visited[pc] != visited_gen:
+                        visited[pc] = visited_gen
                     else:
                         pc = num_inst
                 else:
@@ -1002,8 +1002,8 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             elif itype == OP_ANCHOR_LINE_START:
                 if current_idx == 0 or (current_idx > 0 and input_str[current_idx - 1] == "\n"):
                     pc += 1
-                    if pc < num_inst and not visited[pc]:
-                        visited[pc] = 1
+                    if pc < num_inst and visited[pc] != visited_gen:
+                        visited[pc] = visited_gen
                     else:
                         pc = num_inst
                 else:
@@ -1011,8 +1011,8 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             elif itype == OP_ANCHOR_LINE_END:
                 if current_idx == input_len or (current_idx < input_len and input_str[current_idx] == "\n"):
                     pc += 1
-                    if pc < num_inst and not visited[pc]:
-                        visited[pc] = 1
+                    if pc < num_inst and visited[pc] != visited_gen:
+                        visited[pc] = visited_gen
                     else:
                         pc = num_inst
                 else:
@@ -1025,7 +1025,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
     return reachable
 
 # buildifier: disable=list-append
-def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, input_len):
+def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, input_len, visited, visited_gen):
     next_threads_dict = {}
     match_regs = None
 
@@ -1062,7 +1062,8 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
 
         if match_found:
             # We must pass a COPY of regs because _get_epsilon_closure will modify it in-place.
-            closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs[:], char_idx + 1)
+            visited_gen += 1
+            closure = _get_epsilon_closure(instructions, input_str, input_len, pc + 1, regs[:], char_idx + 1, visited, visited_gen)
             for c_pc, c_regs in closure:
                 if c_pc not in next_threads_dict:
                     next_threads_dict[c_pc] = c_regs
@@ -1073,7 +1074,7 @@ def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, i
     for pc, regs in next_threads_dict.items():
         next_threads += [(pc, regs)]
 
-    return next_threads, match_regs
+    return next_threads, match_regs, visited_gen
 
 # buildifier: disable=list-append
 def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False, has_case_insensitive = False):
@@ -1085,6 +1086,10 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
     if has_case_insensitive:
         input_lower = input_str.lower()
 
+    # Shared visited array for epsilon closure to avoid re-allocation
+    visited = [0] * len(instructions)
+    visited_gen = 1
+
     # Current active threads: list of (pc, regs)
     current_threads = _get_epsilon_closure(
         instructions,
@@ -1093,6 +1098,8 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
         0,
         initial_regs,
         start_index,
+        visited,
+        visited_gen,
     )
 
     match_regs = None
@@ -1123,13 +1130,14 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
                     break
 
             if not found_pc0:
-                start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx)
+                visited_gen += 1
+                start_closure = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs, char_idx, visited, visited_gen)
 
                 # Simply append them, as they are lower priority than existing threads
                 current_threads += start_closure
 
         # Process current threads against character
-        next_threads, batch_match = _process_batch(
+        next_threads, batch_match, visited_gen = _process_batch(
             instructions,
             current_threads,
             char,
@@ -1137,6 +1145,8 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
             char_idx,
             input_str,
             input_len,
+            visited,
+            visited_gen,
         )
 
         if batch_match:
@@ -1169,12 +1179,13 @@ def _execute_core(instructions, input_str, num_regs, start_index = 0, initial_re
 def _execute(instructions, input_str, num_regs, start_index = 0, initial_regs = None, anchored = False, has_case_insensitive = False):
     return _execute_core(instructions, input_str, num_regs, start_index, initial_regs, anchored, has_case_insensitive)
 
+# buildifier: disable=list-append
 def _expand_replacement(repl, match_str, groups, named_groups = {}):
     """Expands backreferences in replacement string."""
 
     # Simple implementation: replace \1, \2, etc.
     # Starlark doesn't have re.sub inside itself, so we iterate manually.
-    res = ""
+    res_parts = []
     skip = 0
     repl_len = len(repl)
     for i in range(repl_len):
@@ -1188,11 +1199,11 @@ def _expand_replacement(repl, match_str, groups, named_groups = {}):
             if next_c >= "0" and next_c <= "9":
                 gid = int(next_c)
                 if gid == 0:
-                    res += match_str
+                    res_parts += [match_str]
                 elif gid <= len(groups):
                     val = groups[gid - 1]
                     if val != None:
-                        res += val
+                        res_parts += [val]
                 skip = 1
                 continue
             elif next_c == "g" and i + 2 < repl_len and repl[i + 2] == "<":
@@ -1211,12 +1222,12 @@ def _expand_replacement(repl, match_str, groups, named_groups = {}):
                         if gid <= len(groups):
                             val = groups[gid - 1]
                             if val != None:
-                                res += val
+                                res_parts += [val]
                     skip = end_name - i
                     continue
 
-        res += c
-    return res
+        res_parts += [c]
+    return "".join(res_parts)
 
 def _optimize_matcher(instructions):
     """Detects simple patterns that can be executed on a fast path."""
