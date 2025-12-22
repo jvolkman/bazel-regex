@@ -140,58 +140,92 @@ _SIMPLE_ESCAPES = {
 }
 
 # buildifier: disable=list-append
-def _make_set_struct(char_set, case_insensitive = False):
-    """Creates a struct for a character set, with mixed-case expansion if needed."""
-    lookup = {}
-    raw = []
-    all_chars_list = []
+# buildifier: disable=list-append
+def _new_set_builder(case_insensitive = False):
+    """Returns a builder for creating a character set struct."""
+    state = {
+        "lookup": {},
+        "ranges": [],
+        "negated_posix_list": [],
+        "all_chars_list": [],
+    }
 
-    # Expansion limit for range expansion into lookup/all_chars.
     RANGE_EXPANSION_LIMIT = 512
-
-    # Cap for all_chars string used in optimizations.
     ALL_CHARS_STR_LIMIT = 2048
 
-    for item in char_set:
-        if type(item) == "tuple":
-            if item[0] == "not":
-                raw += [item]
-                continue
+    def add_char(c):
+        if case_insensitive:
+            c = c.lower()
+        state["lookup"][c] = True
+        state["all_chars_list"] += [c]
 
-            start_code = _ord(item[0])
-            end_code = _ord(item[1])
-            dist = end_code - start_code
+    def add_range(start, end):
+        start_code = _ord(start)
+        end_code = _ord(end)
+        dist = end_code - start_code
 
-            if dist < RANGE_EXPANSION_LIMIT:
-                for code in range(start_code, end_code + 1):
-                    c = _chr(code)
-                    if case_insensitive:
-                        c = c.lower()
-                    lookup[c] = True
-                    all_chars_list += [c]
-            else:
-                raw += [item]
+        if dist < RANGE_EXPANSION_LIMIT:
+            for code in range(start_code, end_code + 1):
+                c = _chr(code)
+                if case_insensitive:
+                    c = c.lower()
+                state["lookup"][c] = True
+                state["all_chars_list"] += [c]
         else:
-            c = item
-            if case_insensitive:
-                c = c.lower()
-            lookup[c] = True
-            all_chars_list += [c]
+            state["ranges"] += [(start, end)]
 
-    # Deduplicate for all_chars_str (lookup handles it for the dict)
-    all_chars_str = ""
-    seen_str = {}
-    for c in all_chars_list:
-        if c not in seen_str:
-            seen_str[c] = True
-            if len(all_chars_str) < ALL_CHARS_STR_LIMIT:
-                all_chars_str += c
+    def add_negated_posix(pset):
+        # pset is a list of atoms (chars or ranges)
+        state["negated_posix_list"] += [pset]
+
+    def build():
+        # Deduplicate for all_chars_str
+        all_chars_str = ""
+        seen_str = {}
+        for c in state["all_chars_list"]:
+            if c not in seen_str:
+                seen_str[c] = True
+                if len(all_chars_str) < ALL_CHARS_STR_LIMIT:
+                    all_chars_str += c
+
+        return struct(
+            lookup = state["lookup"],
+            ranges = state["ranges"],
+            negated_posix = state["negated_posix_list"],
+            all_chars = all_chars_str,
+        )
 
     return struct(
-        lookup = lookup,
-        raw = raw,
-        all_chars = all_chars_str,
+        add_char = add_char,
+        add_range = add_range,
+        add_negated_posix = add_negated_posix,
+        build = build,
     )
+
+def _char_in_set(set_struct, c):
+    """Checks if character c is in the set_struct."""
+    if c in set_struct.lookup:
+        return True
+
+    for r_start, r_end in set_struct.ranges:
+        if c >= r_start and c <= r_end:
+            return True
+
+    for pset in set_struct.negated_posix:
+        # pset is a list of atoms. Character must NOT be in this pset.
+        in_pset = False
+        for item in pset:
+            if type(item) == "tuple":
+                if c >= item[0] and c <= item[1]:
+                    in_pset = True
+                    break
+            elif c == item:
+                in_pset = True
+                break
+        if not in_pset:
+            return True
+
+    return False
 
 def _parse_escape(pattern, i, pattern_len):
     """Parses an escape sequence at i. Returns (char, last_consumed_i)."""
@@ -254,9 +288,12 @@ def _parse_escape(pattern, i, pattern_len):
 
 # buildifier: disable=list-append
 def _parse_set_atom(pattern, i, pattern_len):
-    """Parses one atom in a set. Returns (char_list, new_i)."""
+    """Parses one atom in a set.
+
+    Returns (atom_data, new_i).
+    atom_data is a struct(char=c, atoms=list, negated_atoms=list). Only one field is set.
+    """
     current = pattern[i]
-    char_set = []
 
     if current == "\\" and i + 1 < pattern_len:
         i += 1
@@ -265,13 +302,18 @@ def _parse_set_atom(pattern, i, pattern_len):
         if predef:
             pset, pneg = predef
             if not pneg:
-                char_set += pset
+                return struct(char = None, atoms = pset, negated_atoms = None), i + 1
+            else:
+                # Predefined negated classes (\D, \W, \S) are not supported inside [] blocks
+                # consistent with previous implementation.
+                return struct(char = None, atoms = [], negated_atoms = None), i + 1
         else:
             # Handle escapes inside []
             char, new_i = _parse_escape(pattern, i, pattern_len)
-            char_set += [char]
-            i = new_i
-        i += 1
+
+            # new_i is the last consumed index (e.g. 'n' in \n)
+            # The next atom starts at new_i + 1
+            return struct(char = char, atoms = None, negated_atoms = None), new_i + 1
     elif current == "[" and i + 1 < pattern_len and pattern[i + 1] == ":":
         # POSIX class [[:name:]]
         i += 2
@@ -292,24 +334,17 @@ def _parse_set_atom(pattern, i, pattern_len):
             pset = _get_posix_class(name)
             if pset:
                 if is_negated:
-                    char_set += [("not", pset)]
+                    return struct(char = None, atoms = None, negated_atoms = pset), end_name + 2
                 else:
-                    char_set += pset
-
-                i = end_name + 2
+                    return struct(char = None, atoms = pset, negated_atoms = None), end_name + 2
             else:
                 # Not a valid POSIX class, treat as literal [
-                char_set += ["["]
-                i = start_name - 1  # Back to after [
+                return struct(char = "[", atoms = None, negated_atoms = None), i
         else:
             # No closing :], treat as literal [
-            char_set += ["["]
-            i += 1
+            return struct(char = "[", atoms = None, negated_atoms = None), i
     else:
-        char_set += [current]
-        i += 1
-
-    return char_set, i
+        return struct(char = current, atoms = None, negated_atoms = None), i + 1
 
 # buildifier: disable=list-append
 def _compile_regex(pattern, start_group_id = 0):
@@ -367,41 +402,39 @@ def _compile_regex(pattern, start_group_id = 0):
                 is_negated = True
                 i += 1
 
-            char_set = []
+            builder = _new_set_builder(case_insensitive = case_insensitive)
             for _ in range(pattern_len):
                 if i >= pattern_len or pattern[i] == "]":
                     break
 
-                chars, new_i = _parse_set_atom(pattern, i, pattern_len)
+                atom, new_i = _parse_set_atom(pattern, i, pattern_len)
 
                 is_range = False
-                if new_i < pattern_len and pattern[new_i] == "-" and new_i + 1 < pattern_len and pattern[new_i + 1] != "]":
-                    if len(chars) == 1 and type(chars[0]) == "string":
-                        end_chars, end_i = _parse_set_atom(pattern, new_i + 1, pattern_len)
-                        if len(end_chars) == 1 and type(end_chars[0]) == "string":
-                            start_c = chars[0]
-                            end_c = end_chars[0]
-
-                            if case_insensitive:
-                                start_c = start_c.lower()
-                                end_c = end_c.lower()
-
-                            char_set += [(start_c, end_c)]
-                            i = end_i
-                            is_range = True
+                if atom.char != None and new_i < pattern_len and pattern[new_i] == "-" and new_i + 1 < pattern_len and pattern[new_i + 1] != "]":
+                    end_atom, end_i = _parse_set_atom(pattern, new_i + 1, pattern_len)
+                    if end_atom.char != None:
+                        builder.add_range(atom.char, end_atom.char)
+                        i = end_i
+                        is_range = True
 
                 if not is_range:
-                    if case_insensitive:
-                        for c in chars:
-                            if type(c) == "string":
-                                char_set += [c.lower()]
+                    if atom.char != None:
+                        builder.add_char(atom.char)
+                    elif atom.atoms != None:
+                        for item in atom.atoms:
+                            if type(item) == "tuple":
+                                builder.add_range(item[0], item[1])
                             else:
-                                char_set += [c]
-                    else:
-                        char_set += chars
+                                builder.add_char(item)
+                    elif atom.negated_atoms != None:
+                        builder.add_negated_posix(atom.negated_atoms)
                     i = new_i
 
-            set_struct = _make_set_struct(char_set, case_insensitive = case_insensitive)
+            if i < pattern_len and pattern[i] == "]":
+                # Don't increment i here, _handle_quantifier peeks at i + 1
+                pass
+
+            set_struct = builder.build()
             if case_insensitive:
                 has_case_insensitive = True
                 instructions += [(OP_SET_I, (set_struct, is_negated), None, None)]
@@ -611,7 +644,13 @@ def _compile_regex(pattern, start_group_id = 0):
                 if predef:
                     # predef is (list, is_negated)
                     chars, is_negated = predef
-                    set_struct = _make_set_struct(chars, case_insensitive = case_insensitive)
+                    builder = _new_set_builder(case_insensitive = case_insensitive)
+                    for item in chars:
+                        if type(item) == "tuple":
+                            builder.add_range(item[0], item[1])
+                        else:
+                            builder.add_char(item)
+                    set_struct = builder.build()
                     if case_insensitive:
                         has_case_insensitive = True
                         instructions += [(OP_SET_I, (set_struct, is_negated), None, None)]
@@ -994,32 +1033,6 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 break
 
     return reachable
-
-def _char_in_set(set_struct, c):
-    """Checks if character c is in the set_struct.lookup or raw definition."""
-    if c in set_struct.lookup:
-        return True
-
-    for item in set_struct.raw:
-        if type(item) == "tuple":
-            if item[0] == "not":
-                # Negated POSIX class inside []
-                in_pset = False
-                for pitem in item[1]:
-                    if type(pitem) == "tuple":
-                        if c >= pitem[0] and c <= pitem[1]:
-                            in_pset = True
-                            break
-                    elif c == pitem:
-                        in_pset = True
-                        break
-                if not in_pset:
-                    return True
-            elif c >= item[0] and c <= item[1]:
-                return True
-        elif c == item:
-            return True
-    return False
 
 # buildifier: disable=list-append
 def _process_batch(instructions, batch, char, char_lower, char_idx, input_str, input_len):
