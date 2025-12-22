@@ -74,7 +74,6 @@ def _ord(c):
 
 # Types
 _STRING_TYPE = type("")
-_INT_TYPE = type(0)
 _FUNCTION_TYPE = type(_ord)
 
 # Bytecode Instructions
@@ -387,6 +386,114 @@ def _compile_bracket_class(pattern, i, pattern_len, case_insensitive):
     return builder.build(), is_negated, i
 
 # buildifier: disable=list-append
+def _parse_group_start(pattern, i, pattern_len, flags):
+    """Parses a group start '('.
+
+    Returns struct(new_i, is_capturing, group_name, is_group_start, new_flags).
+    """
+    case_insensitive, multiline, dot_all, ungreedy = flags
+    is_capturing = True
+    group_name = None
+    is_group_start = True
+
+    if i + 2 < pattern_len and pattern[i + 1] == "?":
+        la = pattern[i + 2]
+        if la == ":":
+            is_capturing = False
+            i += 2
+        elif la == "=" or la == "!":
+            fail("Lookarounds not supported")
+        elif la == "<":
+            # Check if it's (?<name>...)
+            if i + 3 < pattern_len and not (pattern[i + 3] == "=" or pattern[i + 3] == "!"):
+                # Named Group (?<name>...)
+                start_name = i + 3
+                end_name = -1
+                for k in range(start_name, min(start_name + MAX_GROUP_NAME_LEN, pattern_len)):
+                    if pattern[k] == ">":
+                        end_name = k
+                        break
+                if end_name != -1:
+                    group_name = pattern[start_name:end_name]
+                    i = end_name  # Skip past >
+            else:
+                fail("Lookbehinds not supported")
+
+        elif la == "P" and i + 3 < pattern_len:
+            if pattern[i + 3] == "<":
+                # Named Group (?P<name>...)
+                start_name = i + 4
+                end_name = -1
+                for k in range(start_name, min(start_name + MAX_GROUP_NAME_LEN, pattern_len)):
+                    if pattern[k] == ">":
+                        end_name = k
+                        break
+                if end_name != -1:
+                    group_name = pattern[start_name:end_name]
+                    i = end_name  # Skip past >
+            elif pattern[i + 3] == "=":
+                fail("Named backreferences not supported")
+        else:
+            # Check for flags e.g. (?i), (?ms), (?-s), (?i:...)
+            # We check looking forward
+            temp_negate = False
+            temp_case = case_insensitive
+            temp_multi = multiline
+            temp_dot = dot_all
+            temp_ungreedy = ungreedy
+
+            k = i + 2
+            found_end = False
+            is_scoped = False
+
+            for _ in range(10):
+                if k >= pattern_len:
+                    break
+                c_flag = pattern[k]
+                if c_flag == ")":
+                    found_end = True
+                    break
+                if c_flag == ":":
+                    found_end = True
+                    is_scoped = True
+                    break
+                if c_flag == "-":
+                    temp_negate = True
+                elif c_flag == "i":
+                    temp_case = not temp_negate
+                elif c_flag == "m":
+                    temp_multi = not temp_negate
+                elif c_flag == "s":
+                    temp_dot = not temp_negate
+                elif c_flag == "U":
+                    temp_ungreedy = not temp_negate
+                else:
+                    # Not a flag group, treat as normal group starting with ?
+                    break
+                k += 1
+
+            if found_end:
+                case_insensitive = temp_case
+                multiline = temp_multi
+                dot_all = temp_dot
+                ungreedy = temp_ungreedy
+                i = k  # Move to ) or :
+
+                if is_scoped:
+                    is_capturing = False
+                    is_group_start = True
+                else:
+                    is_group_start = False
+
+    return struct(
+        new_i = i,
+        is_capturing = is_capturing,
+        group_name = group_name,
+        is_group_start = is_group_start,
+        new_flags = (case_insensitive, multiline, dot_all, ungreedy),
+    )
+
+# buildifier: disable=list-append
 def _compile_regex(pattern, start_group_id = 0):
     """Compiles regex to bytecode using Thompson NFA construction.
 
@@ -447,100 +554,13 @@ def _compile_regex(pattern, start_group_id = 0):
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "(":
-            # Check for non-capturing (?:), named (?P<name>), or flags (?i, ?m, ?s)
-            is_capturing = True
-            group_name = None
-            is_group_start = True
             saved_flags = (case_insensitive, multiline, dot_all, ungreedy)
-
-            if i + 2 < pattern_len and pattern[i + 1] == "?":
-                la = pattern[i + 2]
-                if la == ":":
-                    is_capturing = False
-                    i += 2
-                elif la == "=" or la == "!":
-                    fail("Lookarounds not supported")
-                elif la == "<":
-                    # Check if it's (?<name>...)
-                    if i + 3 < pattern_len and not (pattern[i + 3] == "=" or pattern[i + 3] == "!"):
-                        # Named Group (?<name>...)
-                        start_name = i + 3
-                        end_name = -1
-                        for k in range(start_name, min(start_name + MAX_GROUP_NAME_LEN, pattern_len)):
-                            if pattern[k] == ">":
-                                end_name = k
-                                break
-                        if end_name != -1:
-                            group_name = pattern[start_name:end_name]
-                            i = end_name  # Skip past >
-                    else:
-                        fail("Lookbehinds not supported")
-
-                elif la == "P" and i + 3 < pattern_len:
-                    if pattern[i + 3] == "<":
-                        # Named Group (?P<name>...)
-                        start_name = i + 4
-                        end_name = -1
-                        for k in range(start_name, min(start_name + MAX_GROUP_NAME_LEN, pattern_len)):
-                            if pattern[k] == ">":
-                                end_name = k
-                                break
-                        if end_name != -1:
-                            group_name = pattern[start_name:end_name]
-                            i = end_name  # Skip past >
-                    elif pattern[i + 3] == "=":
-                        fail("Named backreferences not supported")
-                else:
-                    # Check for flags e.g. (?i), (?ms), (?-s), (?i:...)
-                    # We check looking forward
-                    temp_negate = False
-                    temp_case = case_insensitive
-                    temp_multi = multiline
-                    temp_dot = dot_all
-                    temp_ungreedy = ungreedy
-
-                    k = i + 2
-                    found_end = False
-                    is_scoped = False
-
-                    for _ in range(10):
-                        if k >= pattern_len:
-                            break
-                        c_flag = pattern[k]
-                        if c_flag == ")":
-                            found_end = True
-                            break
-                        if c_flag == ":":
-                            found_end = True
-                            is_scoped = True
-                            break
-                        if c_flag == "-":
-                            temp_negate = True
-                        elif c_flag == "i":
-                            temp_case = not temp_negate
-                        elif c_flag == "m":
-                            temp_multi = not temp_negate
-                        elif c_flag == "s":
-                            temp_dot = not temp_negate
-                        elif c_flag == "U":
-                            temp_ungreedy = not temp_negate
-                        else:
-                            # Not a flag group, treat as normal group starting with ?
-                            break
-                        k += 1
-
-                    if found_end:
-                        case_insensitive = temp_case
-                        multiline = temp_multi
-                        dot_all = temp_dot
-                        ungreedy = temp_ungreedy
-                        i = k  # Move to ) or :
-
-                        if is_scoped:
-                            is_capturing = False
-                            is_group_start = True
-                        else:
-                            is_group_start = False
+            res = _parse_group_start(pattern, i, pattern_len, saved_flags)
+            i = res.new_i
+            is_capturing = res.is_capturing
+            group_name = res.group_name
+            is_group_start = res.is_group_start
+            case_insensitive, multiline, dot_all, ungreedy = res.new_flags
 
             if is_group_start:
                 gid = -1
