@@ -1,3 +1,11 @@
 package(default_visibility = ["//visibility:public"])
 
 exports_files(["re.bzl"])
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**/*.bzl"]) + [
+        "BUILD.bazel",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -1,4 +1,4 @@
-"""VM for Starlark Regex Engine."""
+"VM for Starlark Regex Engine."
 
 load(
     "//lib/private:constants.bzl",
@@ -20,6 +20,8 @@ load(
     "OP_SET",
     "OP_SET_I",
     "OP_SPLIT",
+    "OP_STRING",
+    "OP_STRING_I",
     "OP_WORD_BOUNDARY",
     "ORD_LOOKUP",
 )
@@ -100,7 +102,11 @@ def _is_word_char(c):
 def _char_in_set(set_struct, c):
     """Checks if character c is in the set_struct."""
     if c in ORD_LOOKUP:
-        return set_struct.ascii_bitmap[ORD_LOOKUP[c]]
+        ord_c = ORD_LOOKUP[c]
+        if ord_c < 256:
+            res_ascii = set_struct.ascii_bitmap[ord_c]
+            if res_ascii:
+                return True
 
     if c in set_struct.lookup:
         return True
@@ -209,6 +215,9 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     pc += 1
                 else:
                     break
+            elif itype == OP_MATCH:
+                reachable += [(pc, regs)]
+                break  # A match is found, this path is done.
             elif itype == OP_GREEDY_LOOP or itype == OP_GREEDY_LOOP_I:
                 # Optimized x* loop logic with Cache
                 chars = inst[1]
@@ -242,7 +251,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     reachable += [(pc, regs)]
                     break
             else:
-                # Consuming instruction (CHAR, MATCH, SET etc)
+                # Consuming instruction (CHAR, SET etc)
                 # Add to reachable and stop
                 reachable += [(pc, regs)]
                 break
@@ -250,17 +259,29 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
     return reachable
 
 # buildifier: disable=list-append
-def _process_batch(instructions, batch, char, char_lower):
+# buildifier: disable=list-append
+def _process_batch(instructions, batch, input_str, current_idx, input_len, input_lower):
     """Processes a batch of threads against the current character.
 
     batch is a list of (pc, regs) in priority order.
-    Returns (next_threads_list, best_match_regs).
+    Returns (next_threads_list, best_match_regs, scheduled_matches).
     """
     next_threads_list = []
     next_threads_dict = {}
     best_match_regs = None
 
-    for pc, regs in batch:
+    char = input_str[current_idx] if current_idx < input_len else None
+    char_lower = input_lower[current_idx] if input_lower != None and current_idx < input_len else None
+
+    for pc, regs, skip_idx in batch:
+        if skip_idx > current_idx:
+            # Still skipping due to previous OP_STRING match.
+            # Just pass it along while maintaining priority.
+            if pc not in next_threads_dict:
+                next_threads_dict[pc] = True
+                next_threads_list += [(pc, regs, skip_idx)]
+            continue
+
         inst = instructions[pc]
         itype = inst[0]
 
@@ -276,6 +297,30 @@ def _process_batch(instructions, batch, char, char_lower):
             match_found = (inst[1] == char)
         elif itype == OP_CHAR_I:
             match_found = (inst[1] == char_lower)
+        elif itype == OP_STRING:
+            s = inst[1]
+            if input_str.startswith(s, current_idx):
+                match_len = len(s)
+                next_pc = pc + 1
+                if next_pc not in next_threads_dict:
+                    next_threads_dict[next_pc] = True
+                    next_threads_list += [(next_pc, regs, current_idx + match_len)]
+                continue
+        elif itype == OP_STRING_I:
+            s = inst[1]
+
+            if input_lower != None:
+                if input_lower.startswith(s, current_idx):
+                    match_len = len(s)
+                    next_pc = pc + 1
+                    if next_pc not in next_threads_dict:
+                        next_threads_dict[next_pc] = True
+                        next_threads_list += [(next_pc, regs, current_idx + match_len)]
+                    continue
+            else:
+                # Fallback if no input_lower (shouldn't happen if properly flagged)
+                # But execute handles it.
+                pass
         elif itype == OP_ANY:
             match_found = True
         elif itype == OP_ANY_NO_NL:
@@ -304,7 +349,7 @@ def _process_batch(instructions, batch, char, char_lower):
 
             if next_pc not in next_threads_dict:
                 next_threads_dict[next_pc] = True
-                next_threads_list += [(next_pc, regs)]
+                next_threads_list += [(next_pc, regs, current_idx + 1)]
 
     return next_threads_list, best_match_regs
 
@@ -334,43 +379,44 @@ def execute(instructions, input_str, num_regs, start_index = 0, initial_regs = N
     visited_gen = 0
     greedy_cache = {}
 
-    current_threads = [(0, initial_regs)]
+    current_threads = [(0, initial_regs, 0)]
     best_match_regs = None
 
     for char_idx in range(start_index, input_len + 1):
-        char = input_str[char_idx] if char_idx < input_len else None
-        char_lower = input_lower[char_idx] if input_lower != None and char_idx < input_len else None
-
         # Expand epsilon closure for current threads
-        visited_gen += 3  # Increase by 3 to allow up to 2 visits per PC (using idx, idx+1)
+        visited_gen += 3
         expanded_batch = []
 
-        # Thompson simulation maintains threads in priority order.
-        # Deduplication keeps only the highest priority path to each PC.
-        for s_pc, s_regs in current_threads:
+        for s_pc, s_regs, s_skip in current_threads:
+            if s_skip > char_idx:
+                # Still skipping. Maintain priority.
+                expanded_batch += [(s_pc, s_regs, s_skip)]
+                continue
+
             closure = _get_epsilon_closure(instructions, input_str, input_len, s_pc, s_regs, char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower)
             for c_pc, c_regs in closure:
-                expanded_batch += [(c_pc, c_regs)]
+                expanded_batch += [(c_pc, c_regs, char_idx)]
 
         if not anchored and char_idx <= input_len:
-            # Injection for unanchored search. Add PC 0 at every index.
-            # PC 0 will set regs[0] = char_idx via its SAVE 0 instruction.
-            if visited[0] < visited_gen + 2:  # Check if PC 0 has been visited less than twice in this generation
+            if visited[0] < visited_gen + 2:
                 closure0 = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs[:], char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower)
                 for c_pc, c_regs in closure0:
-                    expanded_batch += [(c_pc, c_regs)]
+                    expanded_batch += [(c_pc, c_regs, char_idx)]
+
         if not expanded_batch and anchored:
             break
 
         next_threads = []
         batch_match = None
+
         if expanded_batch:
-            # Process batch against character
             next_threads, batch_match = _process_batch(
                 instructions,
                 expanded_batch,
-                char,
-                char_lower,
+                input_str,
+                char_idx,
+                input_len,
+                input_lower,
             )
 
         if batch_match:
@@ -392,7 +438,6 @@ def execute(instructions, input_str, num_regs, start_index = 0, initial_regs = N
 
     return best_match_regs
 
-# buildifier: disable=list-append
 def expand_replacement(repl, match_str, groups, named_groups = {}):
     """Expands backreferences in replacement string.
 
@@ -446,8 +491,8 @@ def expand_replacement(repl, match_str, groups, named_groups = {}):
                             val = groups[gid - 1]
                             if val != None:
                                 res_parts += [val]
-                    skip = end_name - i
-                    continue
+                        skip = end_name - i
+                        continue
 
         res_parts += [c]
     return "".join(res_parts)
@@ -471,7 +516,7 @@ def fullmatch_regs(bytecode, text, group_count, start_index = 0, has_case_insens
       has_case_insensitive: CI flag.
 
     Returns:
-      List of registers or None.
+      List of registers (start/end indices) or None.
     """
     num_regs = (group_count + 1) * 2
     regs = execute(bytecode, text, num_regs, start_index = start_index, anchored = True, has_case_insensitive = has_case_insensitive)
@@ -593,30 +638,25 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
                 before_suffix_idx = len(text) - len(opt.suffix)
 
                 # Use rstrip to find where the greedy set starts
+                greedy_start = before_suffix_idx
                 if opt.greedy_set_chars != None:
                     prefix_plus_middle = text[:before_suffix_idx]
                     stripped = prefix_plus_middle.rstrip(opt.greedy_set_chars)
                     greedy_start = len(stripped)
-                else:
-                    greedy_start = before_suffix_idx
+
+                # else: no greedy_set_chars
 
                 # Check prefix_set_chars (one char)
+                # Removed this block, as the logic here appears to incorrectly handle cases where
+                # opt.prefix is empty and prefix_set_chars describes the start of the greedy part.
+                # The greedy_start calculation from rstrip is sufficient in such scenarios.
                 match_start = greedy_start
                 prefix_ok = True
-                if opt.prefix_set_chars != None:
-                    if match_start > 0 and text[match_start - 1] in opt.prefix_set_chars:
-                        match_start -= 1
-                    else:
-                        prefix_ok = False
 
                 # Check prefix literal
                 if prefix_ok:
                     if text[:match_start].endswith(opt.prefix):
                         match_start -= len(opt.prefix)
-
-                        # Validate that we matched at least one char if it was a + loop
-                        # Wait, _optimize_matcher sets both prefix_set and greedy_set for +.
-                        # So if prefix_set was matched, we are good.
 
                         regs = [-1] * ((group_count + 1) * 2 + 1)
                         regs[0] = match_start

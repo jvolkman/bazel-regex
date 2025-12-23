@@ -649,6 +649,89 @@ def _optimize_greedy_loops(instructions):
     return final
 
 # buildifier: disable=list-append
+# buildifier: disable=list-append
+# buildifier: disable=list-append
+def _optimize_strings(instructions):
+    # 1. Collect jump targets to be safe
+    jump_targets = {}
+    for inst in instructions:
+        itype = inst[0]
+        if itype == OP_JUMP or itype == OP_SPLIT or itype == OP_GREEDY_LOOP or itype == OP_GREEDY_LOOP_I:
+            if inst[2] != None:
+                jump_targets[inst[2]] = True
+            if inst[3] != None:
+                jump_targets[inst[3]] = True
+
+    new_insts = []
+    old_to_new = {}
+    num_insts = len(instructions)
+
+    skip = 0
+    for i in range(num_insts):
+        if skip > 0:
+            skip -= 1
+
+            # Still map skipped instructions for safety, mapping to the merged instruction
+            # which is the last added instruction in new_insts
+            if new_insts:
+                old_to_new[i] = len(new_insts) - 1
+            continue
+
+        old_to_new[i] = len(new_insts)
+        inst = instructions[i]
+        itype = inst[0]
+
+        merged = False
+
+        if itype == OP_CHAR or itype == OP_CHAR_I:
+            # Try to start building a string
+            current_val = inst[1]
+            expected_next = OP_CHAR if itype == OP_CHAR else OP_CHAR_I
+            result_op = OP_STRING if itype == OP_CHAR else OP_STRING_I
+
+            # Look ahead
+            match_end = i + 1
+
+            # We can't use while. Use range and break.
+            for local_j in range(i + 1, num_insts):
+                # Check jump targets
+                if local_j in jump_targets:
+                    break
+
+                next_inst = instructions[local_j]
+                if next_inst[0] == expected_next:
+                    current_val += next_inst[1]
+                    match_end = local_j + 1
+                else:
+                    break
+
+            if match_end > i + 1:
+                # We merged!
+                new_insts.append((result_op, current_val, None, None))
+                skip = match_end - i - 1
+                merged = True
+
+        if not merged:
+            new_insts.append(inst)
+
+    # Remap jumps
+    final_insts = []
+    for inst in new_insts:
+        itype, val, pc1, pc2 = inst
+        new_pc1 = pc1
+        new_pc2 = pc2
+
+        if pc1 != None and pc1 in old_to_new:
+            new_pc1 = old_to_new[pc1]
+
+        if pc2 != None and pc2 in old_to_new:
+            new_pc2 = old_to_new[pc2]
+
+        final_insts.append((itype, val, new_pc1, new_pc2))
+
+    return final_insts
+
+# buildifier: disable=list-append
 def _optimize_jumps(instructions):
     """Collapses chains of JUMP -> JUMP and SPLIT -> JUMP."""
     num_insts = len(instructions)
@@ -694,6 +777,7 @@ def _optimize_jumps(instructions):
 def _optimize_bytecode(instructions):
     """Optimizes instructions for performance."""
     instructions = _optimize_greedy_loops(instructions)
+    instructions = _optimize_strings(instructions)
     instructions = _optimize_jumps(instructions)
     return instructions
 
