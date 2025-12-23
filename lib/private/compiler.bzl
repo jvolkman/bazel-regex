@@ -643,8 +643,6 @@ def _optimize_greedy_loops(instructions):
     return final
 
 # buildifier: disable=list-append
-# buildifier: disable=list-append
-# buildifier: disable=list-append
 def _optimize_strings(instructions):
     # 1. Collect jump targets to be safe
     jump_targets = {}
@@ -1287,6 +1285,7 @@ def optimize_matcher(instructions):
     # After prefix, check for sets and loops
     prefix_set_chars = None
     greedy_set_chars = None
+    is_greedy_case_insensitive = False
 
     if idx < len(instructions):
         itype = instructions[idx][0]
@@ -1315,10 +1314,12 @@ def optimize_matcher(instructions):
                 # Just a single char, already handled by prefix literal collector above if it was at start
                 pass
 
-        elif itype == OP_GREEDY_LOOP:
+        elif itype == OP_GREEDY_LOOP or itype == OP_GREEDY_LOOP_I:
             # Case 2b: Optimized Greedy Loop
             # inst[1] is the chars stirng
             greedy_set_chars = instructions[idx][1]
+            if itype == OP_GREEDY_LOOP_I:
+                is_greedy_case_insensitive = True
             idx += 1
 
         elif itype == OP_SPLIT:
@@ -1343,6 +1344,8 @@ def optimize_matcher(instructions):
 
                     if chars != None:
                         greedy_set_chars = chars
+                        if atom_inst[0] in [OP_CHAR_I, OP_SET_I]:
+                            is_greedy_case_insensitive = True
                         idx += 3
 
     # If we have a prefix_set but no greedy_set yet, check if a greedy_set follows
@@ -1370,10 +1373,16 @@ def optimize_matcher(instructions):
 
                     if chars != None:
                         greedy_set_chars = chars
+                        if atom_inst[0] in [OP_CHAR_I, OP_SET_I]:
+                            is_greedy_case_insensitive = True
                         idx += 3
 
     # Collect suffix literals
     suffix = ""
+    is_suffix_case_insensitive = False
+    all_cs = True
+    all_ci = True
+
     for _ in range(len(instructions)):
         if idx >= len(instructions):
             break
@@ -1381,11 +1390,31 @@ def optimize_matcher(instructions):
         if itype == OP_CHAR:
             suffix += instructions[idx][1]
             idx += 1
+            all_ci = False
         elif itype == OP_STRING:
             suffix += instructions[idx][1]
             idx += 1
+            all_ci = False
+        elif itype == OP_CHAR_I:
+            suffix += instructions[idx][1]
+            idx += 1
+            all_cs = False
+        elif itype == OP_STRING_I:
+            suffix += instructions[idx][1]
+            idx += 1
+            all_cs = False
         else:
             break
+
+    if suffix != "":
+        if all_cs:
+            pass  # Standard CS suffix
+        elif all_ci:
+            is_suffix_case_insensitive = True
+        else:
+            # Mixed suffix - unsafe for clear search
+            suffix = ""
+            is_suffix_case_insensitive = False
 
     # Check for end anchor or save 1/match
     is_anchored_end = False
@@ -1409,15 +1438,26 @@ def optimize_matcher(instructions):
         else:
             break
 
+    # Calculate disjointness of suffix and greedy set
+    is_suffix_disjoint = True
+    if greedy_set_chars != None and len(suffix) > 0:
+        for i in range(len(suffix)):
+            if suffix[i] in greedy_set_chars:
+                is_suffix_disjoint = False
+                break
+
     if temp_idx < len(instructions) and instructions[temp_idx][0] == OP_MATCH:
         return struct(
             prefix = prefix,
             case_insensitive_prefix = case_insensitive_prefix,
             prefix_set_chars = prefix_set_chars,
             greedy_set_chars = greedy_set_chars,
+            is_greedy_case_insensitive = is_greedy_case_insensitive,
             suffix = suffix,
             is_anchored_start = is_anchored_start,
             is_anchored_end = is_anchored_end,
+            is_suffix_disjoint = is_suffix_disjoint,
+            is_suffix_case_insensitive = is_suffix_case_insensitive,
         )
 
     return None

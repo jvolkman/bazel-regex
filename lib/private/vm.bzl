@@ -623,12 +623,12 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
     """
 
     # Fast path optimization
-    if opt and not has_case_insensitive:
+    if opt:
         if opt.is_anchored_start:
             # If anchored at start, search is just match
             return match_bytecode(bytecode, text, named_groups, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive, opt = opt)
 
-        if opt.is_anchored_end:
+        if opt.is_anchored_end and not has_case_insensitive:
             # Case: ...sets...suffix$
             if text.endswith(opt.suffix):
                 # Work backwards from the suffix
@@ -669,7 +669,7 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
                         return MatchObject(text, regs, compiled, start_index, len(text))
 
         # General case search optimization: skipping to prefix or suffix
-        if opt.prefix != "":
+        if opt.prefix != "" and not has_case_insensitive:
             start_off = start_index
 
             # We can use find() to skip to the first potential match
@@ -696,9 +696,20 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
                 if start_off > len(text):
                     break
         elif opt.suffix != "":
+            # Prepare search parameters
+            search_text = text
+            search_suffix = opt.suffix
+
+            if opt.is_suffix_case_insensitive:
+                # To handle CI search properly, we need lower()
+                # But creating text.lower() is O(N).
+                # We do it once here.
+                search_text = text.lower()
+                search_suffix = opt.suffix.lower()
+
             start_off = start_index
             for _ in range(len(text)):
-                found_idx = text.find(opt.suffix, start_off)
+                found_idx = search_text.find(search_suffix, start_off)
                 if found_idx == -1:
                     break
 
@@ -707,6 +718,12 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
                 if opt.greedy_set_chars != None:
                     # Find furthest back we can go with these chars from this suffix point
                     prefix_data = text[start_index:found_idx]
+
+                    # If the greedy loop is case-insensitive, we must strip case-insensitively.
+                    # The greedy_set_chars are already lowercase if the loop was CI.
+                    if opt.is_greedy_case_insensitive:
+                        prefix_data = prefix_data.lower()
+
                     stripped = prefix_data.rstrip(opt.greedy_set_chars)
                     search_start = start_index + len(stripped)
 
@@ -715,6 +732,22 @@ def search_bytecode(bytecode, text, named_groups, group_count, start_index = 0, 
                         search_start -= 1
 
                 # Now try a real search starting at search_start
+                if opt.prefix == "" and opt.prefix_set_chars == None and opt.is_suffix_disjoint:
+                    # Optimization: We know we matched everything up to suffix
+                    # because we stripped greedy_set_chars.
+                    regs = [-1] * ((group_count + 1) * 2 + 1)
+                    regs[0] = search_start
+                    regs[1] = found_idx + len(opt.suffix)
+                    compiled = struct(
+                        bytecode = bytecode,
+                        named_groups = named_groups,
+                        group_count = group_count,
+                        pattern = None,
+                        has_case_insensitive = has_case_insensitive,
+                        opt = opt,
+                    )
+                    return MatchObject(text, regs, compiled, start_index, len(text))
+
                 regs = match_regs(bytecode, text, group_count, start_index = search_start, has_case_insensitive = has_case_insensitive)
                 if regs:
                     compiled = struct(
