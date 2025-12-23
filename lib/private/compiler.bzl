@@ -23,6 +23,9 @@ load(
     _ORD_LOOKUP = "ORD_LOOKUP",
 )
 
+def _inst(op, val = None, arg1 = None, arg2 = None):
+    return struct(op = op, val = val, arg1 = arg1, arg2 = arg2)
+
 _PREDEFINED_CLASSES = {
     "d": ([("0", "9")], False),
     "D": ([("0", "9")], True),
@@ -446,8 +449,8 @@ def _parse_group_start(pattern, i, pattern_len, flags):
 
 def _is_disjoint(body_inst, next_inst):
     """Returns True if the body instruction is disjoint from the next instruction."""
-    b_type = body_inst[0]
-    n_type = next_inst[0]
+    b_type = body_inst.op
+    n_type = next_inst.op
 
     # 1. Body must be a simple Set or Char
     b_chars = None
@@ -455,12 +458,12 @@ def _is_disjoint(body_inst, next_inst):
     b_is_case_insensitive = False
 
     if b_type == OP_CHAR:
-        b_chars = body_inst[1]
-        b_is_case_insensitive = body_inst[2]
+        b_chars = body_inst.val
+        b_is_case_insensitive = body_inst.arg1
     elif b_type == OP_SET:
         # Check if set is simple
-        set_struct, is_negated = body_inst[1]
-        b_is_case_insensitive = body_inst[2]
+        set_struct, is_negated = body_inst.val
+        b_is_case_insensitive = body_inst.arg1
         if is_negated or not set_struct.is_simple:
             return False
         b_chars = set_struct.all_chars
@@ -475,8 +478,8 @@ def _is_disjoint(body_inst, next_inst):
         return True
 
     if n_type == OP_CHAR:
-        n_char = next_inst[1]
-        n_is_ci = next_inst[2]
+        n_char = next_inst.val
+        n_is_ci = next_inst.arg1
 
         if b_is_case_insensitive:
             # Body is lowercased.
@@ -533,7 +536,7 @@ def _optimize_greedy_loops(instructions):
 
         old_to_new[i] = len(new_insts)
         inst = instructions[i]
-        itype, val, pc1, pc2 = inst
+        itype, val, pc1, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
 
         # Pattern: Split(Body, Exit)
         if itype == OP_SPLIT:
@@ -550,8 +553,8 @@ def _optimize_greedy_loops(instructions):
                 loop_back_pc = body_pc + 1
                 if loop_back_pc < num_insts:
                     loop_inst = instructions[loop_back_pc]
-                    if (loop_inst[0] == OP_JUMP and loop_inst[2] == i) or \
-                       (loop_inst[0] == OP_SPLIT and loop_inst[2] == i):
+                    if (loop_inst.op == OP_JUMP and loop_inst.arg1 == i) or \
+                       (loop_inst.op == OP_SPLIT and loop_inst.arg1 == i):
                         # Pattern: Exit -> Continuation
                         exit_inst = instructions[exit_pc]
 
@@ -561,16 +564,16 @@ def _optimize_greedy_loops(instructions):
                             chars = ""
                             is_ci = False
 
-                            if body_inst[0] == OP_CHAR:
-                                chars = body_inst[1]
-                                is_ci = body_inst[2]
-                            elif body_inst[0] == OP_SET:  # OP_SET
-                                chars = body_inst[1][0].all_chars
-                                is_ci = body_inst[2]
+                            if body_inst.op == OP_CHAR:
+                                chars = body_inst.val
+                                is_ci = body_inst.arg1
+                            elif body_inst.op == OP_SET:  # OP_SET
+                                chars = body_inst.val[0].all_chars
+                                is_ci = body_inst.arg1
 
                             # Emit OP_GREEDY_LOOP
                             # (OP_GREEDY_LOOP, chars, exit_pc, is_ci)
-                            new_insts += [(OP_GREEDY_LOOP, chars, exit_pc, is_ci)]
+                            new_insts += [_inst(OP_GREEDY_LOOP, chars, exit_pc, is_ci)]
                             skip = 2  # Skip body and loop_back
                             continue
 
@@ -585,21 +588,21 @@ def _optimize_greedy_loops(instructions):
 
     mapped_insts = []
     for inst in new_insts:
-        itype = inst[0]
+        itype = inst.op
         if itype == OP_GREEDY_LOOP:
-            chars = inst[1]
-            old_exit = inst[2]
-            is_ci = inst[3]
+            chars = inst.val
+            old_exit = inst.arg1
+            is_ci = inst.arg2
 
             # Defer resolution to post-pass
-            mapped_insts += [(itype, chars, old_exit, is_ci)]
+            mapped_insts += [_inst(itype, chars, old_exit, is_ci)]
         else:
             mapped_insts += [inst]
 
     # Post-pass to fix PCs
     final = []
     for inst in mapped_insts:
-        itype, val, pc1, pc2 = inst
+        itype, val, pc1, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
         new_pc1 = pc1
         new_pc2 = pc2
 
@@ -612,7 +615,7 @@ def _optimize_greedy_loops(instructions):
             if pc2 != None and pc2 in old_to_new:
                 new_pc2 = old_to_new[pc2]
 
-        final += [(itype, val, new_pc1, new_pc2)]
+        final += [_inst(itype, val, new_pc1, new_pc2)]
 
     return final
 
@@ -621,7 +624,7 @@ def _optimize_strings(instructions):
     # 1. Collect jump targets to be safe
     jump_targets = {}
     for inst in instructions:
-        itype, val, pc1, pc2 = inst
+        itype, val, pc1, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
         if itype == OP_JUMP or itype == OP_SPLIT or itype == OP_GREEDY_LOOP:
             if pc1 != None:
                 jump_targets[pc1] = True
@@ -646,7 +649,7 @@ def _optimize_strings(instructions):
 
         old_to_new[i] = len(new_insts)
         inst = instructions[i]
-        itype, val, is_ci, pc2 = inst
+        itype, val, is_ci, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
 
         merged = False
 
@@ -667,15 +670,15 @@ def _optimize_strings(instructions):
                 next_inst = instructions[local_j]
 
                 # Can only merge if next is also OP_CHAR and has the same case sensitivity
-                if next_inst[0] == OP_CHAR and next_inst[2] == current_is_ci:
-                    current_val += next_inst[1]
+                if next_inst.op == OP_CHAR and next_inst.arg1 == current_is_ci:
+                    current_val += next_inst.val
                     match_end = local_j + 1
                 else:
                     break
 
             if match_end > i + 1:
                 # We merged!
-                new_insts.append((OP_STRING, current_val, current_is_ci, None))
+                new_insts.append(_inst(OP_STRING, current_val, current_is_ci))
                 skip = match_end - i - 1
                 merged = True
 
@@ -685,7 +688,7 @@ def _optimize_strings(instructions):
     # Remap jumps
     final_insts = []
     for inst in new_insts:
-        itype, val, pc1, pc2 = inst
+        itype, val, pc1, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
         new_pc1 = pc1
         new_pc2 = pc2
 
@@ -695,7 +698,7 @@ def _optimize_strings(instructions):
         if pc2 != None and pc2 in old_to_new:
             new_pc2 = old_to_new[pc2]
 
-        final_insts.append((itype, val, new_pc1, new_pc2))
+        final_insts.append(_inst(itype, val, new_pc1, new_pc2))
 
     return final_insts
 
@@ -710,7 +713,7 @@ def _optimize_jumps(instructions):
         new_insts = []
         for i in range(num_insts):
             inst = instructions[i]
-            itype, val, pc1, pc2 = inst
+            itype, val, pc1, pc2 = inst.op, inst.val, inst.arg1, inst.arg2
 
             new_pc1 = pc1
             new_pc2 = pc2
@@ -719,21 +722,21 @@ def _optimize_jumps(instructions):
             if itype == OP_JUMP or itype == OP_SPLIT or itype == OP_GREEDY_LOOP:
                 if pc1 != None and pc1 < num_insts:
                     target_inst = instructions[pc1]
-                    if target_inst[0] == OP_JUMP:
-                        new_pc1 = target_inst[2]
+                    if target_inst.op == OP_JUMP:
+                        new_pc1 = target_inst.arg1
                         if new_pc1 != pc1:
                             changed = True
 
             if itype == OP_SPLIT:
                 if pc2 != None and pc2 < num_insts:
                     target_inst = instructions[pc2]
-                    if target_inst[0] == OP_JUMP:
-                        new_pc2 = target_inst[2]
+                    if target_inst.op == OP_JUMP:
+                        new_pc2 = target_inst.arg1
                         if new_pc2 != pc2:
                             changed = True
 
             if changed:
-                new_insts.append((itype, val, new_pc1, new_pc2))
+                new_insts.append(_inst(itype, val, new_pc1, new_pc2))
                 optimized = True
             else:
                 new_insts.append(inst)
@@ -758,7 +761,7 @@ def _build_alt_tree(instructions, group_ctx):
     orig_inst = instructions[entry_pc]
     relocated_pc = len(instructions)
     instructions += [orig_inst]
-    instructions += [(OP_JUMP, None, entry_pc + 1, None)]
+    instructions += [_inst(OP_JUMP, arg1 = entry_pc + 1)]
 
     tree_start_pc = len(instructions)
     current_branches = branches[:]
@@ -767,11 +770,11 @@ def _build_alt_tree(instructions, group_ctx):
     for j in range(len(current_branches) - 1):
         if j < len(current_branches) - 2:
             next_split = len(instructions) + 1
-            instructions += [(OP_SPLIT, None, current_branches[j], next_split)]
+            instructions += [_inst(OP_SPLIT, arg1 = current_branches[j], arg2 = next_split)]
         else:
-            instructions += [(OP_SPLIT, None, current_branches[j], current_branches[-1])]
+            instructions += [_inst(OP_SPLIT, arg1 = current_branches[j], arg2 = current_branches[-1])]
 
-    instructions[entry_pc] = (OP_JUMP, None, tree_start_pc, None)
+    instructions[entry_pc] = _inst(OP_JUMP, arg1 = tree_start_pc)
 
 # buildifier: disable=list-append
 def _copy_insts(insts, atom_start, new_start):
@@ -781,7 +784,7 @@ def _copy_insts(insts, atom_start, new_start):
     new_block = []
 
     for op in template:
-        code, val, pc1, pc2 = op
+        code, val, pc1, pc2 = op.op, op.val, op.arg1, op.arg2
 
         # Shift jumps if they point inside the atom or to the immediate end
         if code == OP_JUMP or code == OP_SPLIT or code == OP_GREEDY_LOOP:
@@ -790,7 +793,7 @@ def _copy_insts(insts, atom_start, new_start):
         if code == OP_SPLIT:
             if pc2 != None and pc2 >= atom_start:
                 pc2 += delta
-        new_block += [(code, val, pc1, pc2)]
+        new_block += [_inst(code, val, pc1, pc2)]
 
     return new_block
 
@@ -812,9 +815,9 @@ def _apply_question_mark(insts, atom_start, lazy = False):
     skip_target = len(insts)
 
     if lazy:
-        insts[split_pc] = (OP_SPLIT, None, skip_target, atom_pc)
+        insts[split_pc] = _inst(OP_SPLIT, arg1 = skip_target, arg2 = atom_pc)
     else:
-        insts[split_pc] = (OP_SPLIT, None, atom_pc, skip_target)
+        insts[split_pc] = _inst(OP_SPLIT, arg1 = atom_pc, arg2 = skip_target)
 
 # buildifier: disable=list-append
 def _apply_star(insts, atom_start, lazy = False):
@@ -837,11 +840,11 @@ def _apply_star(insts, atom_start, lazy = False):
     skip_target = len(insts)
 
     if lazy:
-        insts[end_split_pc] = (OP_SPLIT, None, skip_target, split_pc)
-        insts[split_pc] = (OP_SPLIT, None, skip_target, atom_pc)
+        insts[end_split_pc] = _inst(OP_SPLIT, arg1 = skip_target, arg2 = split_pc)
+        insts[split_pc] = _inst(OP_SPLIT, arg1 = skip_target, arg2 = atom_pc)
     else:
-        insts[end_split_pc] = (OP_SPLIT, None, split_pc, skip_target)
-        insts[split_pc] = (OP_SPLIT, None, atom_pc, skip_target)
+        insts[end_split_pc] = _inst(OP_SPLIT, arg1 = split_pc, arg2 = skip_target)
+        insts[split_pc] = _inst(OP_SPLIT, arg1 = atom_pc, arg2 = skip_target)
 
 # buildifier: disable=list-append
 def _apply_plus(insts, atom_start, lazy = False):
@@ -851,9 +854,9 @@ def _apply_plus(insts, atom_start, lazy = False):
     # Lazy: atom -> SPLIT(next, atom_start)
     next_pc = len(insts) + 1
     if lazy:
-        insts += [(OP_SPLIT, None, next_pc, atom_start)]
+        insts += [_inst(OP_SPLIT, arg1 = next_pc, arg2 = atom_start)]
     else:
-        insts += [(OP_SPLIT, None, atom_start, next_pc)]
+        insts += [_inst(OP_SPLIT, arg1 = atom_start, arg2 = next_pc)]
 
 # buildifier: disable=list-append
 def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
@@ -922,28 +925,28 @@ def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
                     curr_start = len(insts)
                     delta = curr_start - atom_start
                     for op in template:
-                        code, val, pc1, pc2 = op
+                        code, val, pc1, pc2 = op.op, op.val, op.arg1, op.arg2
                         if code == OP_JUMP or code == OP_SPLIT or code == OP_GREEDY_LOOP:
                             if pc1 != None and pc1 >= atom_start:
                                 pc1 += delta
                         if code == OP_SPLIT:
                             if pc2 != None and pc2 >= atom_start:
                                 pc2 += delta
-                        insts += [(code, val, pc1, pc2)]
+                        insts += [_inst(code, val, pc1, pc2)]
 
                 # Expand Max
                 if max_rep == -1:
                     block_start = len(insts)
                     delta = block_start - atom_start
                     for op in template:
-                        code, val, pc1, pc2 = op
+                        code, val, pc1, pc2 = op.op, op.val, op.arg1, op.arg2
                         if code == OP_JUMP or code == OP_SPLIT or code == OP_GREEDY_LOOP:
                             if pc1 != None and pc1 >= atom_start:
                                 pc1 += delta
                         if code == OP_SPLIT:
                             if pc2 != None and pc2 >= atom_start:
                                 pc2 += delta
-                        insts += [(code, val, pc1, pc2)]
+                        insts += [_inst(code, val, pc1, pc2)]
                     _apply_star(insts, block_start, lazy = is_lazy)
 
                 elif max_rep > min_rep:
@@ -951,14 +954,14 @@ def _handle_quantifier(pattern, i, insts, atom_start = -1, ungreedy = False):
                         block_start = len(insts)
                         delta = block_start - atom_start
                         for op in template:
-                            code, val, pc1, pc2 = op
+                            code, val, pc1, pc2 = op.op, op.val, op.arg1, op.arg2
                             if code == OP_JUMP or code == OP_SPLIT or code == OP_GREEDY_LOOP:
                                 if pc1 != None and pc1 >= atom_start:
                                     pc1 += delta
                             if code == OP_SPLIT:
                                 if pc2 != None and pc2 >= atom_start:
                                     pc2 += delta
-                            insts += [(code, val, pc1, pc2)]
+                            insts += [_inst(code, val, pc1, pc2)]
                         _apply_question_mark(insts, block_start, lazy = is_lazy)
 
                 return final_i
@@ -1010,7 +1013,7 @@ def compile_regex(pattern, start_group_id = 0):
     has_case_insensitive = False
 
     # Always save group 0 (full match) start
-    instructions += [(OP_SAVE, 0, None, None)]
+    instructions += [_inst(OP_SAVE, 0)]
 
     # Root group to handle top-level alternations
     stack += [{
@@ -1029,15 +1032,15 @@ def compile_regex(pattern, start_group_id = 0):
 
         if char == "^":
             if multiline:
-                instructions += [(OP_ANCHOR_LINE_START, None, None, None)]
+                instructions += [_inst(OP_ANCHOR_LINE_START)]
             else:
-                instructions += [(OP_ANCHOR_START, None, None, None)]
+                instructions += [_inst(OP_ANCHOR_START)]
 
         elif char == "$":
             if multiline:
-                instructions += [(OP_ANCHOR_LINE_END, None, None, None)]
+                instructions += [_inst(OP_ANCHOR_LINE_END)]
             else:
-                instructions += [(OP_ANCHOR_END, None, None, None)]
+                instructions += [_inst(OP_ANCHOR_END)]
 
         elif char == "[":
             i += 1
@@ -1045,9 +1048,9 @@ def compile_regex(pattern, start_group_id = 0):
 
             if case_insensitive:
                 has_case_insensitive = True
-                instructions += [(OP_SET, (set_struct, is_negated), True, None)]
+                instructions += [_inst(OP_SET, (set_struct, is_negated), True)]
             else:
-                instructions += [(OP_SET, (set_struct, is_negated), False, None)]
+                instructions += [_inst(OP_SET, (set_struct, is_negated), False)]
             i = _handle_quantifier(pattern, i, instructions)
 
         elif char == "(":
@@ -1064,7 +1067,7 @@ def compile_regex(pattern, start_group_id = 0):
                 if is_capturing:
                     group_count += 1
                     gid = group_count
-                    instructions += [(OP_SAVE, gid * 2, None, None)]
+                    instructions += [_inst(OP_SAVE, gid * 2)]
                     if group_name:
                         named_groups[group_name] = gid
 
@@ -1084,15 +1087,15 @@ def compile_regex(pattern, start_group_id = 0):
                 if top["type"] == "group":
                     if len(top["branch_starts"]) > 1:
                         top["exit_jumps"] += [len(instructions)]
-                        instructions += [(OP_JUMP, None, -1, None)]
+                        instructions += [_inst(OP_JUMP, arg1 = -1)]
                         _build_alt_tree(instructions, top)
 
                     for jump_idx in top["exit_jumps"]:
-                        instructions[jump_idx] = (OP_JUMP, None, len(instructions), None)
+                        instructions[jump_idx] = _inst(OP_JUMP, arg1 = len(instructions))
 
                     # Only emit SAVE if it was a capturing group
                     if top["is_capturing"]:
-                        instructions += [(OP_SAVE, top["gid"] * 2 + 1, None, None)]
+                        instructions += [_inst(OP_SAVE, top["gid"] * 2 + 1)]
 
                     start_pc_fix = top["start_pc"]
 
@@ -1105,28 +1108,28 @@ def compile_regex(pattern, start_group_id = 0):
             if stack:
                 group_ctx = stack[-1]
                 group_ctx["exit_jumps"] += [len(instructions)]
-                instructions += [(OP_JUMP, None, -1, None)]
+                instructions += [_inst(OP_JUMP, arg1 = -1)]
                 group_ctx["branch_starts"] += [len(instructions)]
             else:
                 # Should not happen with root group
-                instructions += [(OP_CHAR, char, None, None)]
+                instructions += [_inst(OP_CHAR, char, False)]
 
         elif char == ".":
             if dot_all:
-                instructions += [(OP_ANY, None, None, None)]  # ANY (includes \n
+                instructions += [_inst(OP_ANY)]  # ANY (includes \n
             else:
-                instructions += [(OP_ANY_NO_NL, None, None, None)]  # ANY_NO_NL (excludes \n
+                instructions += [_inst(OP_ANY_NO_NL)]  # ANY_NO_NL (excludes \n
             i = _handle_quantifier(pattern, i, instructions, ungreedy = ungreedy)
 
         elif char == "\\":
             if i + 1 < pattern_len:
                 next_c = pattern[i + 1]
                 if next_c == "A":
-                    instructions += [(OP_ANCHOR_START, None, None, None)]
+                    instructions += [_inst(OP_ANCHOR_START)]
                     i += 2
                     continue
                 elif next_c == "z":
-                    instructions += [(OP_ANCHOR_END, None, None, None)]
+                    instructions += [_inst(OP_ANCHOR_END)]
                     i += 2
                     continue
                 elif next_c == "Q":
@@ -1139,9 +1142,9 @@ def compile_regex(pattern, start_group_id = 0):
                             for j in range(i, k):
                                 if case_insensitive:
                                     has_case_insensitive = True
-                                    instructions += [(OP_CHAR, pattern[j].lower(), True, None)]
+                                    instructions += [_inst(OP_CHAR, val = pattern[j].lower(), arg1 = True)]
                                 else:
-                                    instructions += [(OP_CHAR, pattern[j], False, None)]
+                                    instructions += [_inst(OP_CHAR, val = pattern[j], arg1 = False)]
                             i = k + 2  # Skip \E
                             found_e = True
                             break
@@ -1150,9 +1153,9 @@ def compile_regex(pattern, start_group_id = 0):
                         for j in range(i, pattern_len):
                             if case_insensitive:
                                 has_case_insensitive = True
-                                instructions += [(OP_CHAR, pattern[j].lower(), True, None)]
+                                instructions += [_inst(OP_CHAR, val = pattern[j].lower(), arg1 = True)]
                             else:
-                                instructions += [(OP_CHAR, pattern[j], False, None)]
+                                instructions += [_inst(OP_CHAR, val = pattern[j], arg1 = False)]
                         i = pattern_len
                     continue
 
@@ -1171,13 +1174,13 @@ def compile_regex(pattern, start_group_id = 0):
                     set_struct = builder.build()
                     if case_insensitive:
                         has_case_insensitive = True
-                        instructions += [(OP_SET, (set_struct, is_negated), True, None)]
+                        instructions += [_inst(OP_SET, val = (set_struct, is_negated), arg1 = True)]
                     else:
-                        instructions += [(OP_SET, (set_struct, is_negated), False, None)]
+                        instructions += [_inst(OP_SET, val = (set_struct, is_negated), arg1 = False)]
                 elif next_c == "b":
-                    instructions += [(OP_WORD_BOUNDARY, None, None, None)]
+                    instructions += [_inst(OP_WORD_BOUNDARY)]
                 elif next_c == "B":
-                    instructions += [(OP_NOT_WORD_BOUNDARY, None, None, None)]
+                    instructions += [_inst(OP_NOT_WORD_BOUNDARY)]
                 else:
                     # Handle escapes
                     char, new_i = _parse_escape(pattern, i, pattern_len)
@@ -1187,17 +1190,17 @@ def compile_regex(pattern, start_group_id = 0):
                         has_case_insensitive = True
                         if char:
                             char = char.lower()
-                        instructions += [(OP_CHAR, char, True, None)]
+                        instructions += [_inst(OP_CHAR, val = char, arg1 = True)]
                     else:
-                        instructions += [(OP_CHAR, char, False, None)]
+                        instructions += [_inst(OP_CHAR, val = char, arg1 = False)]
                 i = _handle_quantifier(pattern, i, instructions, ungreedy = ungreedy)
 
         else:
             if case_insensitive:
                 has_case_insensitive = True
-                instructions += [(OP_CHAR, char.lower(), True, None)]
+                instructions += [_inst(OP_CHAR, val = char.lower(), arg1 = True)]
             else:
-                instructions += [(OP_CHAR, char, False, None)]
+                instructions += [_inst(OP_CHAR, val = char, arg1 = False)]
             i = _handle_quantifier(pattern, i, instructions, ungreedy = ungreedy)
 
         i += 1
@@ -1208,14 +1211,14 @@ def compile_regex(pattern, start_group_id = 0):
         if root["type"] == "root":
             if len(root["branch_starts"]) > 1:
                 root["exit_jumps"] += [len(instructions)]
-                instructions += [(OP_JUMP, None, -1, None)]
+                instructions += [_inst(OP_JUMP, arg1 = -1)]
                 _build_alt_tree(instructions, root)
                 for jump_idx in root["exit_jumps"]:
-                    instructions[jump_idx] = (OP_JUMP, None, len(instructions), None)
+                    instructions[jump_idx] = _inst(OP_JUMP, arg1 = len(instructions))
 
     # Save group 0 end and match
-    instructions += [(OP_SAVE, 1, None, None)]
-    instructions += [(OP_MATCH, None, None, None)]
+    instructions += [_inst(OP_SAVE, 1)]
+    instructions += [_inst(OP_MATCH)]
 
     instructions = _optimize_bytecode(instructions)
 
@@ -1242,27 +1245,50 @@ def optimize_matcher(instructions):
 
     # Check for anchors
     is_anchored_start = False
-    if idx < len(instructions) and instructions[idx][0] == OP_ANCHOR_START:
+    if idx < len(instructions) and instructions[idx].op == OP_ANCHOR_START:
         is_anchored_start = True
         idx += 1
+
+    all_ci = True
+    all_cs = True
 
     # Collect prefix literals
     for _ in range(len(instructions)):
         if idx >= len(instructions):
             break
-        itype = instructions[idx][0]
+        inst = instructions[idx]
+        itype = inst.op
         if itype == OP_CHAR:
-            prefix += instructions[idx][1]
-            if instructions[idx][2]:  # is_ci
-                case_insensitive_prefix = True
+            prefix += inst.val
+            if inst.arg1:  # is_ci
+                all_cs = False
+            else:
+                all_ci = False
             idx += 1
         elif itype == OP_STRING:
-            prefix += instructions[idx][1]
-            if instructions[idx][2]:  # is_ci
-                case_insensitive_prefix = True
+            prefix += inst.val
+            if inst.arg1:  # is_ci
+                all_cs = False
+            else:
+                all_ci = False
             idx += 1
         else:
             break
+
+    if prefix != "":
+        if all_ci:
+            case_insensitive_prefix = True
+        elif all_cs:
+            case_insensitive_prefix = False
+        else:
+            # Mixed prefix - unsafe for simple case-insensitive fast path search
+            # because .lower().find() will over-match.
+            # Easiest is to disable prefix optimization if mixed, or just use CS search
+            # which might miss matches but is at least safe from over-matching.
+            # Better: if mixed, we can't use the simple string-based fast path safely
+            # without VM confirmation.
+            prefix = ""
+            case_insensitive_prefix = False
 
     # After prefix, check for sets and loops
     prefix_set_chars = None
@@ -1270,101 +1296,111 @@ def optimize_matcher(instructions):
     is_greedy_case_insensitive = False
 
     if idx < len(instructions):
-        itype = instructions[idx][0]
+        inst = instructions[idx]
+        itype = inst.op
         if itype in [OP_CHAR, OP_SET]:
             # Case 1: [set]+ or c+ -> ATOM, SPLIT(idx, idx+2)
-            if idx + 1 < len(instructions) and instructions[idx + 1][0] == OP_SPLIT and instructions[idx + 1][2] == idx and instructions[idx + 1][3] == idx + 2:
-                chars = None
-                is_ci = False
-                if itype == OP_CHAR:
-                    chars = instructions[idx][1]
-                    is_ci = instructions[idx][2]
-                else:
-                    set_data, is_negated = instructions[idx][1]
-                    is_ci = instructions[idx][2]
-                    if not is_negated:
-                        chars = set_data.all_chars
+            if idx + 1 < len(instructions):
+                next_inst = instructions[idx + 1]
+                if next_inst.op == OP_SPLIT and next_inst.arg1 == idx and next_inst.arg2 == idx + 2:
+                    chars = None
+                    is_ci = False
+                    if itype == OP_CHAR:
+                        chars = inst.val
+                        is_ci = inst.arg1
+                    else:
+                        set_data, is_negated = inst.val
+                        is_ci = inst.arg1
+                        if not is_negated:
+                            chars = set_data.all_chars
 
-                if chars != None:
-                    prefix_set_chars = chars
-                    greedy_set_chars = chars
-                    is_greedy_case_insensitive = is_ci
-                    idx += 2
+                    if chars != None:
+                        prefix_set_chars = chars
+                        greedy_set_chars = chars
+                        is_greedy_case_insensitive = is_ci
+                        idx += 2
+                elif itype == OP_SET:
+                    # Case 2: Just a match-one prefix set [set]
+                    set_data, is_negated = inst.val
+                    if not is_negated:
+                        prefix_set_chars = set_data.all_chars
+                        idx += 1
             elif itype == OP_SET:
-                # Case 2: Just a match-one prefix set [set]
-                set_data, is_negated = instructions[idx][1]
+                # Case 2 (at end): Just a match-one prefix set [set]
+                set_data, is_negated = inst.val
                 if not is_negated:
                     prefix_set_chars = set_data.all_chars
                     idx += 1
-            else:
-                # Just a single char, already handled by prefix literal collector above if it was at start
-                pass
 
         elif itype == OP_GREEDY_LOOP:
             # Case 2b: Optimized Greedy Loop
-            # inst[1] is the chars stirng
-            greedy_set_chars = instructions[idx][1]
-            is_greedy_case_insensitive = instructions[idx][3]
+            greedy_set_chars = inst.val
+            is_greedy_case_insensitive = inst.arg2
             idx += 1
 
         elif itype == OP_SPLIT:
             # Case 3: [set]* or c* loop
-            if idx + 2 < len(instructions) and instructions[idx][2] == idx + 1 and instructions[idx][3] == idx + 3:
-                atom_inst = instructions[idx + 1]
-                end_inst = instructions[idx + 2]
-                is_loop = False
-                if end_inst[0] == OP_JUMP and end_inst[2] == idx:
-                    is_loop = True
-                elif end_inst[0] == OP_SPLIT and end_inst[2] == idx:
-                    is_loop = True
+            if idx + 2 < len(instructions):
+                split_inst = instructions[idx]
+                if split_inst.arg1 == idx + 1 and split_inst.arg2 == idx + 3:
+                    atom_inst = instructions[idx + 1]
+                    end_inst = instructions[idx + 2]
+                    is_loop = False
+                    if end_inst.op == OP_JUMP and end_inst.arg1 == idx:
+                        is_loop = True
+                    elif end_inst.op == OP_SPLIT and end_inst.arg1 == idx:
+                        is_loop = True
 
-                if is_loop:
-                    chars = None
-                    is_ci = False
-                    if atom_inst[0] == OP_CHAR:
-                        chars = atom_inst[1]
-                        is_ci = atom_inst[2]
-                    elif atom_inst[0] == OP_SET:
-                        set_data, is_negated = atom_inst[1]
-                        is_ci = atom_inst[2]
-                        if not is_negated:
-                            chars = set_data.all_chars
+                    if is_loop:
+                        chars = None
+                        is_ci = False
+                        if atom_inst.op == OP_CHAR:
+                            chars = atom_inst.val
+                            is_ci = atom_inst.arg1
+                        elif atom_inst.op == OP_SET:
+                            set_data, is_negated = atom_inst.val
+                            is_ci = atom_inst.arg1
+                            if not is_negated:
+                                chars = set_data.all_chars
 
-                    if chars != None:
-                        greedy_set_chars = chars
-                        is_greedy_case_insensitive = is_ci
-                        idx += 3
+                        if chars != None:
+                            greedy_set_chars = chars
+                            is_greedy_case_insensitive = is_ci
+                            idx += 3
 
     # If we have a prefix_set but no greedy_set yet, check if a greedy_set follows
     # Example: ^\d\w*
     if prefix_set_chars != None and greedy_set_chars == None:
-        if idx < len(instructions) and instructions[idx][0] == OP_SPLIT:
-            # Check for * loop
-            if idx + 2 < len(instructions) and instructions[idx][2] == idx + 1 and instructions[idx][3] == idx + 3:
-                atom_inst = instructions[idx + 1]
-                end_inst = instructions[idx + 2]
-                is_loop = False
-                if end_inst[0] == OP_JUMP and end_inst[2] == idx:
-                    is_loop = True
-                elif end_inst[0] == OP_SPLIT and end_inst[2] == idx:
-                    is_loop = True
+        if idx < len(instructions):
+            inst = instructions[idx]
+            if inst.op == OP_SPLIT:
+                # Check for * loop
+                if idx + 2 < len(instructions):
+                    if inst.arg1 == idx + 1 and inst.arg2 == idx + 3:
+                        atom_inst = instructions[idx + 1]
+                        end_inst = instructions[idx + 2]
+                        is_loop = False
+                        if end_inst.op == OP_JUMP and end_inst.arg1 == idx:
+                            is_loop = True
+                        elif end_inst.op == OP_SPLIT and end_inst.arg1 == idx:
+                            is_loop = True
 
-                if is_loop:
-                    chars = None
-                    is_ci = False
-                    if atom_inst[0] == OP_CHAR:
-                        chars = atom_inst[1]
-                        is_ci = atom_inst[2]
-                    elif atom_inst[0] == OP_SET:
-                        set_data, is_negated = atom_inst[1]
-                        is_ci = atom_inst[2]
-                        if not is_negated:
-                            chars = set_data.all_chars
+                        if is_loop:
+                            chars = None
+                            is_ci = False
+                            if atom_inst.op == OP_CHAR:
+                                chars = atom_inst.val
+                                is_ci = atom_inst.arg1
+                            elif atom_inst.op == OP_SET:
+                                set_data, is_negated = atom_inst.val
+                                is_ci = atom_inst.arg1
+                                if not is_negated:
+                                    chars = set_data.all_chars
 
-                    if chars != None:
-                        greedy_set_chars = chars
-                        is_greedy_case_insensitive = is_ci
-                        idx += 3
+                            if chars != None:
+                                greedy_set_chars = chars
+                                is_greedy_case_insensitive = is_ci
+                                idx += 3
 
     # Collect suffix literals
     suffix = ""
@@ -1375,17 +1411,18 @@ def optimize_matcher(instructions):
     for _ in range(len(instructions)):
         if idx >= len(instructions):
             break
-        itype = instructions[idx][0]
+        inst = instructions[idx]
+        itype = inst.op
         if itype == OP_CHAR:
-            suffix += instructions[idx][1]
-            if instructions[idx][2]:  # is_ci
+            suffix += inst.val
+            if inst.arg1:  # is_ci
                 all_cs = False
             else:
                 all_ci = False
             idx += 1
         elif itype == OP_STRING:
-            suffix += instructions[idx][1]
-            if instructions[idx][2]:  # is_ci
+            suffix += inst.val
+            if inst.arg1:  # is_ci
                 all_cs = False
             else:
                 all_ci = False
@@ -1409,18 +1446,18 @@ def optimize_matcher(instructions):
     # Skip trailing saves if searching for end
     temp_idx = idx
     for _ in range(len(instructions)):
-        if temp_idx < len(instructions) and instructions[temp_idx][0] == OP_SAVE:
+        if temp_idx < len(instructions) and instructions[temp_idx].op == OP_SAVE:
             temp_idx += 1
         else:
             break
 
-    if temp_idx < len(instructions) and instructions[temp_idx][0] == OP_ANCHOR_END:
+    if temp_idx < len(instructions) and instructions[temp_idx].op == OP_ANCHOR_END:
         is_anchored_end = True
         temp_idx += 1
 
     # Check if we reached the matching end: SAVE 1, MATCH
     for _ in range(len(instructions)):
-        if temp_idx < len(instructions) and instructions[temp_idx][0] == OP_SAVE:
+        if temp_idx < len(instructions) and instructions[temp_idx].op == OP_SAVE:
             temp_idx += 1
         else:
             break
@@ -1433,7 +1470,7 @@ def optimize_matcher(instructions):
                 is_suffix_disjoint = False
                 break
 
-    if temp_idx < len(instructions) and instructions[temp_idx][0] == OP_MATCH:
+    if temp_idx < len(instructions) and instructions[temp_idx].op == OP_MATCH:
         return struct(
             prefix = prefix,
             case_insensitive_prefix = case_insensitive_prefix,

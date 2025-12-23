@@ -153,16 +153,16 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 break
 
             inst = instructions[pc]
-            itype = inst[0]
+            itype = inst.op
 
             if itype == OP_JUMP:
-                pc = inst[2]
+                pc = inst.arg1
                 # Continue loop to process new pc
 
             elif itype == OP_SPLIT:
                 # Add both branches
-                pc1 = inst[2]
-                pc2 = inst[3]
+                pc1 = inst.arg1
+                pc2 = inst.arg2
 
                 # Push lower priority (pc2) first so we follow pc1 (higher priority) immediately
                 # DFS order matters for priority
@@ -171,7 +171,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 # Continue loop to process pc1
 
             elif itype == OP_SAVE:
-                group_idx = inst[1]
+                group_idx = inst.val
                 regs = regs[:]  # Copy on write
                 regs[group_idx] = current_idx
 
@@ -207,14 +207,11 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     pc += 1
                 else:
                     break
-            elif itype == OP_MATCH:
-                reachable += [(pc, regs)]
-                break  # A match is found, this path is done.
             elif itype == OP_GREEDY_LOOP:
                 # Optimized x* loop logic with Cache
-                chars = inst[1]
+                chars = inst.val
                 match_len = 0
-                is_ci = inst[3]
+                is_ci = inst.arg2
 
                 # Check cache
                 last_end = greedy_cache.get(pc, -1)
@@ -234,7 +231,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
                 if match_len == 0:
                     # Epsilon transition to Exit
-                    pc = inst[2]
+                    pc = inst.arg1
                     # Continue loop to process new pc
 
                 else:
@@ -276,7 +273,7 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
             continue
 
         inst = instructions[pc]
-        itype = inst[0]
+        itype = inst.op
 
         if itype == OP_MATCH:
             best_match_regs = regs
@@ -287,13 +284,13 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
 
         match_found = False
         if itype == OP_CHAR:
-            if inst[2]:  # is_ci
-                match_found = (inst[1] == char_lower)
+            if inst.arg1:  # is_ci
+                match_found = (inst.val == char_lower)
             else:
-                match_found = (inst[1] == char)
+                match_found = (inst.val == char)
         elif itype == OP_STRING:
-            s = inst[1]
-            if inst[2]:  # is_ci
+            s = inst.val
+            if inst.arg1:  # is_ci
                 if input_lower != None:
                     if input_lower.startswith(s, current_idx):
                         match_len = len(s)
@@ -314,8 +311,8 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
         elif itype == OP_ANY_NO_NL:
             match_found = (char != "\n")
         elif itype == OP_SET:
-            set_struct, is_negated = inst[1]
-            is_ci = inst[2]
+            set_struct, is_negated = inst.val
+            is_ci = inst.arg1
             c_check = char_lower if is_ci else char
 
             if c_check in ORD_LOOKUP:
@@ -324,11 +321,11 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
                 match_found = (_char_in_set(set_struct, c_check) != is_negated)
 
         elif itype == OP_GREEDY_LOOP:
-            is_ci = inst[3]
+            is_ci = inst.arg2
             if is_ci:
-                match_found = (char_lower in inst[1])
+                match_found = (char_lower in inst.val)
             else:
-                match_found = (char in inst[1])
+                match_found = (char in inst.val)
 
         if match_found:
             next_pc = pc
