@@ -1,4 +1,4 @@
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@bazel_lib//:bzl_library.bzl", "bzl_library")
 load("//lib/tests:test_anchors_flags.bzl", "anchors_flags_test")
 load("//lib/tests:test_api.bzl", "api_test")
 load("//lib/tests:test_core.bzl", "core_test")
