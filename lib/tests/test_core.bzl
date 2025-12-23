@@ -26,6 +26,7 @@ def run_tests_core(env):
         ("a(b*)c", "abbbc", {0: "abbbc", 1: "bbb"}),
         ("h.llo", "hello", {0: "hello"}),
         ("(o(r(a)n)ge)", "orange", {0: "orange", 1: "orange", 2: "ran", 3: "a"}),
+        (".+b", "aaaaaabcd", {0: "aaaaaab"}),
 
         # 5. Shortcuts
         ("\\d+", "123", {0: "123"}),
