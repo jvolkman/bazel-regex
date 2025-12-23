@@ -11,6 +11,8 @@ A pure Starlark implementation of a Regex engine. Vibe coded with Gemini.
 
 ## Usage
 
+For full API documentation, see [the API Reference](docs/re.md).
+
 ```python
 load("@bazel-regex//lib:re.bzl", "compile", "findall", "fullmatch", "search", "sub")
 
