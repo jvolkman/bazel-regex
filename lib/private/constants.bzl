@@ -1,0 +1,62 @@
+"""Constants for Starlark Regex Engine."""
+
+MAX_GROUP_NAME_LEN = 32
+
+# Bytecode Instructions
+OP_CHAR = 0  # Match specific character
+OP_ANY = 1  # Match any character (including \n)
+OP_SPLIT = 2  # Jump to pc1 or pc2
+OP_JUMP = 3  # Jump to pc
+OP_SAVE = 4  # Save current index
+OP_MATCH = 5  # Success
+OP_SET = 6  # Match any in set
+OP_ANCHOR_START = 7  # Match absolute start
+OP_ANCHOR_END = 8  # Match absolute end
+OP_WORD_BOUNDARY = 9  # Match if word/non-word transition
+OP_NOT_WORD_BOUNDARY = 10  # Match if no word/non-word transition
+OP_ANY_NO_NL = 11  # Match any character EXCEPT \n
+OP_ANCHOR_LINE_START = 12  # Match start or after \n
+OP_ANCHOR_LINE_END = 13  # Match end or before \n
+OP_CHAR_I = 14  # Match character case-insensitively
+OP_SET_I = 15  # Match set case-insensitively
+OP_STRING = 16  # Match string literally
+OP_STRING_I = 17  # Match string case-insensitively
+OP_GREEDY_LOOP = 18  # Optimization: Fast-path for x*
+OP_GREEDY_LOOP_I = 19  # Optimization: Fast-path for (?i)x*
+
+CHR_LOOKUP = (
+    "\000\001\002\003\004\005\006\007" +
+    "\010\011\012\013\014\015\016\017" +
+    "\020\021\022\023\024\025\026\027" +
+    "\030\031\032\033\034\035\036\037" +
+    "\040\041\042\043\044\045\046\047" +
+    "\050\051\052\053\054\055\056\057" +
+    "\060\061\062\063\064\065\066\067" +
+    "\070\071\072\073\074\075\076\077" +
+    "\100\101\102\103\104\105\106\107" +
+    "\110\111\112\113\114\115\116\117" +
+    "\120\121\122\123\124\125\126\127" +
+    "\130\131\132\133\134\135\136\137" +
+    "\140\141\142\143\144\145\146\147" +
+    "\150\151\152\153\154\155\156\157" +
+    "\160\161\162\163\164\165\166\167" +
+    "\170\171\172\173\174\175\176\177" +
+    "\200\201\202\203\204\205\206\207" +
+    "\210\211\212\213\214\215\216\217" +
+    "\220\221\222\223\224\225\226\227" +
+    "\230\231\232\233\234\235\236\237" +
+    "\240\241\242\243\244\245\246\247" +
+    "\250\251\252\253\254\255\256\257" +
+    "\260\261\262\263\264\265\266\267" +
+    "\270\271\272\273\274\275\276\277" +
+    "\300\301\302\303\304\305\306\307" +
+    "\310\311\312\313\314\315\316\317" +
+    "\320\321\322\323\324\325\326\327" +
+    "\330\331\332\333\334\335\336\337" +
+    "\340\341\342\343\344\345\346\347" +
+    "\350\351\352\353\354\355\356\357" +
+    "\360\361\362\363\364\365\366\367" +
+    "\370\371\372\373\374\375\376\377"
+)
+
+ORD_LOOKUP = {CHR_LOOKUP[i]: i for i in range(256)}
