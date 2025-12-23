@@ -57,7 +57,7 @@ def _char_in_set(set_struct, c):
 
 # buildifier: disable=list-append
 # buildifier: disable=function-docstring-args
-def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx, visited, visited_gen, greedy_cache, input_lower = None):
+def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_regs, current_idx, visited, visited_gen, greedy_cache, input_lower = None, word_mask = None):
     reachable = []
     num_inst = len(instructions)
 
@@ -116,8 +116,12 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     regs[-1] = group_idx // 2
                 pc += 1
             elif itype == OP_WORD_BOUNDARY or itype == OP_NOT_WORD_BOUNDARY:
-                is_prev_word = (current_idx > 0 and input_str[current_idx - 1] in _WORD_CHARS)
-                is_curr_word = (current_idx < input_len and input_str[current_idx] in _WORD_CHARS)
+                if word_mask != None:
+                    is_prev_word = (current_idx > 0 and word_mask[current_idx - 1])
+                    is_curr_word = (current_idx < input_len and word_mask[current_idx])
+                else:
+                    is_prev_word = (current_idx > 0 and input_str[current_idx - 1] in _WORD_CHARS)
+                    is_curr_word = (current_idx < input_len and input_str[current_idx] in _WORD_CHARS)
                 match = (is_prev_word != is_curr_word) if itype == OP_WORD_BOUNDARY else (is_prev_word == is_curr_word)
                 if match:
                     pc += 1
@@ -220,10 +224,8 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
 
         match_found = False
         if itype == OP_CHAR:
-            if inst.is_ci:  # is_ci
-                match_found = (inst.val == char_lower)
-            else:
-                match_found = (inst.val == char)
+            check_char = char_lower if inst.is_ci else char
+            match_found = (inst.val == check_char)
         elif itype == OP_STRING:
             s = inst.val
             if inst.is_ci:  # is_ci
@@ -296,6 +298,16 @@ def execute(instructions, input_str, num_regs, start_index = 0, initial_regs = N
     input_len = len(input_str)
     input_lower = input_str.lower() if has_case_insensitive else None
 
+    # Pre-calculate word mask for boundary checks
+    word_mask = None
+    has_boundary = False
+    for inst in instructions:
+        if inst.op == OP_WORD_BOUNDARY or inst.op == OP_NOT_WORD_BOUNDARY:
+            has_boundary = True
+            break
+    if has_boundary:
+        word_mask = [c in _WORD_CHARS for c in input_str.elems()]
+
     visited = [0] * len(instructions)
     visited_gen = 0
     greedy_cache = {}
@@ -314,13 +326,13 @@ def execute(instructions, input_str, num_regs, start_index = 0, initial_regs = N
                 expanded_batch += [(s_pc, s_regs, s_skip)]
                 continue
 
-            closure = _get_epsilon_closure(instructions, input_str, input_len, s_pc, s_regs, char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower)
+            closure = _get_epsilon_closure(instructions, input_str, input_len, s_pc, s_regs, char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower, word_mask = word_mask)
             for c_pc, c_regs in closure:
                 expanded_batch += [(c_pc, c_regs, char_idx)]
 
         if not anchored and char_idx <= input_len:
             if visited[0] < visited_gen + 2:
-                closure0 = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs[:], char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower)
+                closure0 = _get_epsilon_closure(instructions, input_str, input_len, 0, initial_regs[:], char_idx, visited, visited_gen, greedy_cache, input_lower = input_lower, word_mask = word_mask)
                 for c_pc, c_regs in closure0:
                     expanded_batch += [(c_pc, c_regs, char_idx)]
 

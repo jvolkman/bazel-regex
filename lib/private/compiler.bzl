@@ -735,6 +735,7 @@ def _optimize_strings(instructions):
 
             if match_end > i + 1:
                 # We merged!
+                # Note: current_val is already lowercase if current_is_ci is true
                 new_insts.append(_inst(OP_STRING, val = current_val, is_ci = current_is_ci))
                 skip = match_end - i - 1
                 merged = True
