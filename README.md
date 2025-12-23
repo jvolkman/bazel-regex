@@ -1,12 +1,10 @@
 # bazel-regex
 
-A pure Starlark implementation of a Regex Engine.
+A pure Starlark implementation of a Regex Engine. Vibe coded with Gemini.
 
 ## Overview
 
 `bazel-regex` provides a Thompson NFA-based regex engine designed for Starlark environments (like Bazel). It provides a significant subset of RE2 syntax with linear-time performance guarantees.
-
-Vibe coded with Gemini.
 
 ## Usage
 
