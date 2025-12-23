@@ -17,12 +17,8 @@ OP_NOT_WORD_BOUNDARY = 10  # Match if no word/non-word transition
 OP_ANY_NO_NL = 11  # Match any character EXCEPT \n
 OP_ANCHOR_LINE_START = 12  # Match start or after \n
 OP_ANCHOR_LINE_END = 13  # Match end or before \n
-OP_CHAR_I = 14  # Match character case-insensitively
-OP_SET_I = 15  # Match set case-insensitively
-OP_STRING = 16  # Match string literally
-OP_STRING_I = 17  # Match string case-insensitively
-OP_GREEDY_LOOP = 18  # Optimization: Fast-path for x*
-OP_GREEDY_LOOP_I = 19  # Optimization: Fast-path for (?i)x*
+OP_STRING = 14  # Match string literally
+OP_GREEDY_LOOP = 15  # Optimization: Fast-path for x*
 
 CHR_LOOKUP = (
     "\000\001\002\003\004\005\006\007" +

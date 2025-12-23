@@ -10,18 +10,14 @@ load(
     "OP_ANY",
     "OP_ANY_NO_NL",
     "OP_CHAR",
-    "OP_CHAR_I",
     "OP_GREEDY_LOOP",
-    "OP_GREEDY_LOOP_I",
     "OP_JUMP",
     "OP_MATCH",
     "OP_NOT_WORD_BOUNDARY",
     "OP_SAVE",
     "OP_SET",
-    "OP_SET_I",
     "OP_SPLIT",
     "OP_STRING",
-    "OP_STRING_I",
     "OP_WORD_BOUNDARY",
     "ORD_LOOKUP",
 )
@@ -214,10 +210,11 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
             elif itype == OP_MATCH:
                 reachable += [(pc, regs)]
                 break  # A match is found, this path is done.
-            elif itype == OP_GREEDY_LOOP or itype == OP_GREEDY_LOOP_I:
+            elif itype == OP_GREEDY_LOOP:
                 # Optimized x* loop logic with Cache
                 chars = inst[1]
                 match_len = 0
+                is_ci = inst[3]
 
                 # Check cache
                 last_end = greedy_cache.get(pc, -1)
@@ -226,7 +223,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     match_len = last_end - current_idx
                 else:
                     # Compute and cache
-                    if itype == OP_GREEDY_LOOP_I and input_lower != None:
+                    if is_ci and input_lower != None:
                         current_slice = input_lower[current_idx:]
                     else:
                         current_slice = input_str[current_idx:]
@@ -290,57 +287,52 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
 
         match_found = False
         if itype == OP_CHAR:
-            match_found = (inst[1] == char)
-        elif itype == OP_CHAR_I:
-            match_found = (inst[1] == char_lower)
+            if inst[2]:  # is_ci
+                match_found = (inst[1] == char_lower)
+            else:
+                match_found = (inst[1] == char)
         elif itype == OP_STRING:
             s = inst[1]
-            if input_str.startswith(s, current_idx):
+            if inst[2]:  # is_ci
+                if input_lower != None:
+                    if input_lower.startswith(s, current_idx):
+                        match_len = len(s)
+                        next_pc = pc + 1
+                        if next_pc not in next_threads_dict:
+                            next_threads_dict[next_pc] = True
+                            next_threads_list += [(next_pc, regs, current_idx + match_len)]
+                        continue
+            elif input_str.startswith(s, current_idx):
                 match_len = len(s)
                 next_pc = pc + 1
                 if next_pc not in next_threads_dict:
                     next_threads_dict[next_pc] = True
                     next_threads_list += [(next_pc, regs, current_idx + match_len)]
                 continue
-        elif itype == OP_STRING_I:
-            s = inst[1]
-
-            if input_lower != None:
-                if input_lower.startswith(s, current_idx):
-                    match_len = len(s)
-                    next_pc = pc + 1
-                    if next_pc not in next_threads_dict:
-                        next_threads_dict[next_pc] = True
-                        next_threads_list += [(next_pc, regs, current_idx + match_len)]
-                    continue
-            else:
-                # Fallback if no input_lower (shouldn't happen if properly flagged)
-                # But execute handles it.
-                pass
         elif itype == OP_ANY:
             match_found = True
         elif itype == OP_ANY_NO_NL:
             match_found = (char != "\n")
         elif itype == OP_SET:
             set_struct, is_negated = inst[1]
-            if char in ORD_LOOKUP:
-                match_found = (set_struct.ascii_bitmap[ORD_LOOKUP[char]] != is_negated)
+            is_ci = inst[2]
+            c_check = char_lower if is_ci else char
+
+            if c_check in ORD_LOOKUP:
+                match_found = (set_struct.ascii_bitmap[ORD_LOOKUP[c_check]] != is_negated)
             else:
-                match_found = (_char_in_set(set_struct, char) != is_negated)
-        elif itype == OP_SET_I:
-            set_struct, is_negated = inst[1]
-            if char_lower in ORD_LOOKUP:
-                match_found = (set_struct.ascii_bitmap[ORD_LOOKUP[char_lower]] != is_negated)
-            else:
-                match_found = (_char_in_set(set_struct, char_lower) != is_negated)
+                match_found = (_char_in_set(set_struct, c_check) != is_negated)
+
         elif itype == OP_GREEDY_LOOP:
-            match_found = (char in inst[1])
-        elif itype == OP_GREEDY_LOOP_I:
-            match_found = (char_lower in inst[1])
+            is_ci = inst[3]
+            if is_ci:
+                match_found = (char_lower in inst[1])
+            else:
+                match_found = (char in inst[1])
 
         if match_found:
             next_pc = pc
-            if itype != OP_GREEDY_LOOP and itype != OP_GREEDY_LOOP_I:
+            if itype != OP_GREEDY_LOOP:
                 next_pc = pc + 1
 
             if next_pc not in next_threads_dict:
