@@ -65,10 +65,6 @@ _CHR_LOOKUP = (
 
 _ORD_LOOKUP = {_CHR_LOOKUP[i]: i for i in range(256)}
 
-# Types
-_STRING_TYPE = type("")
-_FUNCTION_TYPE = type(_chr)
-
 # Bytecode Instructions
 OP_CHAR = 0  # Match specific character
 OP_ANY = 1  # Match any character (including \n)
@@ -130,6 +126,10 @@ def _chr(i):
 
 def _ord(c):
     return _ORD_LOOKUP[c]
+
+# Types
+_STRING_TYPE = type("")
+_FUNCTION_TYPE = type(_chr)
 
 def _is_word_char(c):
     """Returns True if c is [a-zA-Z0-9_]."""
@@ -295,7 +295,6 @@ def _parse_escape(pattern, i, pattern_len):
 
     return char, i
 
-# buildifier: disable=list-append
 def _parse_set_atom(pattern, i, pattern_len):
     """Parses one atom in a set.
 
@@ -355,7 +354,6 @@ def _parse_set_atom(pattern, i, pattern_len):
     else:
         return struct(char = current, atoms = None, negated_atoms = None), i + 1
 
-# buildifier: disable=list-append
 def _compile_bracket_class(pattern, i, pattern_len, case_insensitive):
     """Compiles a [...] set expression.
 
@@ -397,7 +395,6 @@ def _compile_bracket_class(pattern, i, pattern_len, case_insensitive):
 
     return builder.build(), is_negated, i
 
-# buildifier: disable=list-append
 def _parse_group_start(pattern, i, pattern_len, flags):
     """Parses a group start '('.
 
