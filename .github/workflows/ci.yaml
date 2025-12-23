@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bazel
+        uses: bazelbuild/setup-bazelisk@v3
+
+      - name: Run Tests
+        run: bazel test //...
