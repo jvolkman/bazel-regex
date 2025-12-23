@@ -63,17 +63,11 @@ _CHR_LOOKUP = (
     "\370\371\372\373\374\375\376\377"
 )
 
-def _chr(i):
-    return _CHR_LOOKUP[i]
-
 _ORD_LOOKUP = {_CHR_LOOKUP[i]: i for i in range(256)}
-
-def _ord(c):
-    return _ORD_LOOKUP[c]
 
 # Types
 _STRING_TYPE = type("")
-_FUNCTION_TYPE = type(_ord)
+_FUNCTION_TYPE = type(_chr)
 
 # Bytecode Instructions
 OP_CHAR = 0  # Match specific character
@@ -96,12 +90,6 @@ OP_STRING = 16  # Match string literally
 OP_STRING_I = 17  # Match string case-insensitively
 OP_GREEDY_LOOP = 18  # Optimization: Fast-path for x*
 
-def _is_word_char(c):
-    """Returns True if c is [a-zA-Z0-9_]."""
-    if c == None:
-        return False
-    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_"
-
 _PREDEFINED_CLASSES = {
     "d": ([("0", "9")], False),
     "D": ([("0", "9")], True),
@@ -110,10 +98,6 @@ _PREDEFINED_CLASSES = {
     "s": ([(" ", " "), ("\t", "\t"), ("\n", "\n"), ("\r", "\r"), ("\f", "\f"), ("\v", "\v")], False),
     "S": ([(" ", " "), ("\t", "\t"), ("\n", "\n"), ("\r", "\r"), ("\f", "\f"), ("\v", "\v")], True),
 }
-
-def _get_predefined_class(char):
-    """Returns (set_definition, is_negated) for \\d, \\w, \\s, \\D, \\W, \\S."""
-    return _PREDEFINED_CLASSES.get(char)
 
 _POSIX_CLASSES = {
     "alnum": [("0", "9"), ("A", "Z"), ("a", "z")],
@@ -132,10 +116,6 @@ _POSIX_CLASSES = {
     "xdigit": [("0", "9"), ("A", "F"), ("a", "f")],
 }
 
-def _get_posix_class(name):
-    """Returns the character set for a POSIX class name."""
-    return _POSIX_CLASSES.get(name)
-
 _SIMPLE_ESCAPES = {
     "n": "\n",
     "r": "\r",
@@ -144,6 +124,26 @@ _SIMPLE_ESCAPES = {
     "v": "\v",
     "a": "\007",
 }
+
+def _chr(i):
+    return _CHR_LOOKUP[i]
+
+def _ord(c):
+    return _ORD_LOOKUP[c]
+
+def _is_word_char(c):
+    """Returns True if c is [a-zA-Z0-9_]."""
+    if c == None:
+        return False
+    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_"
+
+def _get_predefined_class(char):
+    """Returns (set_definition, is_negated) for \\d, \\w, \\s, \\D, \\W, \\S."""
+    return _PREDEFINED_CLASSES.get(char)
+
+def _get_posix_class(name):
+    """Returns the character set for a POSIX class name."""
+    return _POSIX_CLASSES.get(name)
 
 # buildifier: disable=list-append
 # buildifier: disable=list-append
