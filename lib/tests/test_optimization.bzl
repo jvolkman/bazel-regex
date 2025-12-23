@@ -53,5 +53,13 @@ def run_tests_optimization(env):
         ("a*$", "aaa", {0: "aaa"}),
         # search("a*$", "aaab") matches "" at the end (index 4)
         ("a*$", "aaab", {0: ""}),
+
+        # 7. Dot-Star Loop
+        (".*a", "baaa", {0: "baaa"}),
+        (".*", "abc", {0: "abc"}),
+
+        # 8. Case Insensitive Loop
+        ("(?i)a*b", "AAAb", {0: "AAAb"}),
+        ("(?i)[a-z]*[0-9]", "ABC1", {0: "ABC1"}),
     ]
     run_suite(env, "Optimization Tests", cases)
