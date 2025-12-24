@@ -16,7 +16,7 @@ bzl_library(
     srcs = ["utils.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "//re:re",
+        "//re",
         "@bazel_skylib//lib:unittest",
     ],
 )

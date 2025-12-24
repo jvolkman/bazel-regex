@@ -60,5 +60,8 @@ def run_tests_core(env):
         # 7. Stress Tests: Long Literal
         ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", {0: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}),
         (".*", "abc\ndef", {0: "abc"}),  # Dot without s flag
+
+        # 8. A float
+        (r"^[+-]?\d+(?:_\d+)*(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?", "4.666", {0: "4.666"}),
     ]
     run_suite(env, "Core Tests", cases)

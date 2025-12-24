@@ -1070,10 +1070,12 @@ def compile_regex(pattern, start_group_id = 0):
 
             if is_group_start:
                 gid = -1
+                start_pc = len(instructions)
                 if is_capturing:
                     group_count += 1
                     gid = group_count
                     instructions += [_inst(OP_SAVE, slot = gid * 2)]
+                    start_pc = len(instructions) - 1
                     if group_name:
                         named_groups[group_name] = gid
 
@@ -1081,7 +1083,7 @@ def compile_regex(pattern, start_group_id = 0):
                     "type": "group",
                     "gid": gid,
                     "is_capturing": is_capturing,
-                    "start_pc": len(instructions) - 1,
+                    "start_pc": start_pc,
                     "branch_starts": [len(instructions)],
                     "exit_jumps": [],
                     "flags": saved_flags,
