@@ -7,6 +7,7 @@ module(
     version = "0.1.0",
 )
 
-bazel_dep(name = "bazel_skylib", version = "1.7.1")
 bazel_dep(name = "bazel_lib", version = "3.1.0")
-bazel_dep(name = "stardoc", version = "0.7.0")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+
+bazel_dep(name = "bazelrc-preset.bzl", version = "1.8.0", dev_dependency = True)

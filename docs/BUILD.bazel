@@ -1,15 +1,15 @@
-load("//docs:docs.bzl", "stardoc_with_diff_test")
+load("@aspect_bazel_lib//lib:docs.bzl", "stardoc_with_diff_test", "update_docs")
 
-package(default_visibility = ["//visibility:public"])
+java_binary(
+    name = "renderer",
+    main_class = "com/google/devtools/build/stardoc/renderer/RendererMain",
+    runtime_deps = ["@stardoc-prebuilt//jar"],
+)
 
 stardoc_with_diff_test(
-    name = "re_doc",
-    bzl_library_target = "//lib:re",
-    input_file = "//lib:re.bzl",
-    out_file = "re.md",
+    name = "re",
+    bzl_library_target = "@bazel-regex//lib:re",
+    renderer = ":renderer",
 )
 
-alias(
-    name = "update",
-    actual = ":re_doc",
-)
+update_docs(name = "update")

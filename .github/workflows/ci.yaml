@@ -18,4 +18,8 @@ jobs:
         uses: bazelbuild/setup-bazelisk@v3
 
       - name: Run Tests
+        run: bazel test --config=ci //...
+
+      - name: Run Doc Tests
         run: bazel test //...
+        working-directory: docs

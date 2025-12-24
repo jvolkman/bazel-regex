@@ -3,13 +3,3 @@ Root BUILD file for the Starlark regex engine.
 """
 
 package(default_visibility = ["//visibility:public"])
-
-filegroup(
-    name = "srcs",
-    srcs = [
-        "//lib:all_srcs",
-        "BUILD.bazel",
-        "MODULE.bazel",
-    ],
-    visibility = ["//visibility:public"],
-)
