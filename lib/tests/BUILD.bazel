@@ -6,6 +6,7 @@ load("//lib/tests:test_escape.bzl", "escape_test")
 load("//lib/tests:test_groups.bzl", "groups_test")
 load("//lib/tests:test_optimization.bzl", "optimization_test")
 load("//lib/tests:test_quantifiers.bzl", "quantifiers_test")
+load("//lib/tests:test_root_import.bzl", "root_import_test")
 load("//lib/tests:test_unicode.bzl", "unicode_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -36,6 +37,8 @@ optimization_test(name = "optimization_test")
 
 unicode_test(name = "unicode_test")
 
+root_import_test(name = "root_import_test")
+
 test_suite(
     name = "all_tests",
     tests = [
@@ -46,6 +49,7 @@ test_suite(
         ":groups_test",
         ":optimization_test",
         ":quantifiers_test",
+        ":root_import_test",
         ":unicode_test",
     ],
 )

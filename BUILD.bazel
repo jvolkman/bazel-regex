@@ -2,4 +2,14 @@
 Root BUILD file for the Starlark regex engine.
 """
 
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
 package(default_visibility = ["//visibility:public"])
+
+exports_files(["re.bzl"])
+
+bzl_library(
+    name = "re",
+    srcs = ["re.bzl"],
+    deps = ["//lib:re"],
+)
