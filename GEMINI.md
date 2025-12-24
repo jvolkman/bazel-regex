@@ -2,7 +2,7 @@
 
 ## Profiling Starlark Performance
 
-The `restar` library executes its regex logic (compilation and matching) during the **analysis phase** of the Bazel build, not the execution phase. This means standard test execution times (e.g., `PASSED in 0.3s`) reported by `bazel test` do not reflect the actual runtime of the regex engine.
+The `re.bzl` library executes its regex logic (compilation and matching) during the **analysis phase** of the Bazel build, not the execution phase. This means standard test execution times (e.g., `PASSED in 0.3s`) reported by `bazel test` do not reflect the actual runtime of the regex engine.
 
 To accurately measure performance changes:
 
@@ -22,7 +22,7 @@ To accurately measure performance changes:
 
 ## Starlark Performance Best Practices
 
-Based on profiling within the `restar` codebase, the following patterns are significantly more efficient in Starlark:
+Based on profiling within the `re.bzl` codebase, the following patterns are significantly more efficient in Starlark:
 
 ### 1. Prefer Operators Over Method Calls
 Operators are built-in to the Starlark interpreter and avoid the overhead of method lookup and dispatch.
