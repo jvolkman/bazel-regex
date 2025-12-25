@@ -1,5 +1,6 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("@re.bzl", "re", compile_func = "compile")
+load("//:re.bzl", "re")
+load("//re:re.bzl", compile_func = "compile")
 
 def _test_root_import_impl(ctx):
     env = unittest.begin(ctx)

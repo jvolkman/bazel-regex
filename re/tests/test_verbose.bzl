@@ -1,7 +1,7 @@
 """Tests for Verbose mode."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//re:re.bzl", "re")
+load("//:re.bzl", "re")
 
 def _verbose_test_impl(ctx):
     env = unittest.begin(ctx)
