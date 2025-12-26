@@ -621,8 +621,8 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
             search_suffix = opt.suffix
 
             if opt.is_suffix_case_insensitive:
-                # To handle CI search properly, we need lower()
-                search_text = text.lower()
+                # To handle CI search properly, we use pre-computed input_lower
+                search_text = input_lower
                 search_suffix = opt.suffix.lower()
 
             start_off = start_index
@@ -636,8 +636,7 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
                 if opt.greedy_set_chars != None:
                     # If the greedy loop is case-insensitive, we must strip case-insensitively.
                     if opt.is_greedy_case_insensitive:
-                        strip_text = input_lower if input_lower != None else text.lower()
-                        match_len = _windowed_rstrip(strip_text, opt.greedy_set_chars, found_idx)
+                        match_len = _windowed_rstrip(input_lower, opt.greedy_set_chars, found_idx)
                         search_start = start_index + max(0, (found_idx - match_len) - start_index)
                     else:
                         match_len = _windowed_rstrip(text, opt.greedy_set_chars, found_idx)
@@ -654,8 +653,7 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
                         can_bypass = True
                     elif opt.is_ungreedy_loop:
                         if opt.is_greedy_case_insensitive:
-                            strip_text = input_lower if input_lower != None else text.lower()
-                            strip_len = _windowed_lstrip(strip_text, opt.greedy_set_chars, search_start)
+                            strip_len = _windowed_lstrip(input_lower, opt.greedy_set_chars, search_start)
                         else:
                             strip_len = _windowed_lstrip(text, opt.greedy_set_chars, search_start)
 
