@@ -745,8 +745,6 @@ def match_regs(bytecode, text, group_count, start_index = 0, has_case_insensitiv
                 else:
                     # Not anchored at end
                     if opt.greedy_set_chars != None:
-                        rest = text[match_end:]
-
                         # If there is a suffix, we only support it in the fast path
                         # if it's anchored at the end (handled above) or if it's empty.
                         # Greedy match the rest.
