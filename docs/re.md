@@ -2,14 +2,14 @@
 
 Public API for the Starlark regex engine.
 
-<a id="re.compile"></a>
+<a id="compile"></a>
 
-## re.compile
+## compile
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "compile")
 
-re.compile(<a href="#re.compile-pattern">pattern</a>, <a href="#re.compile-flags">flags</a>)
+compile(<a href="#compile-pattern">pattern</a>, <a href="#compile-flags">flags</a>)
 </pre>
 
 Compiles a regex pattern into a reusable object.
@@ -23,8 +23,8 @@ like the top-level functions but with the pattern pre-compiled.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.compile-pattern"></a>pattern |  The regex pattern string.   |  none |
-| <a id="re.compile-flags"></a>flags |  Regex flags (e.g. re.I, re.M, re.VERBOSE).   |  `0` |
+| <a id="compile-pattern"></a>pattern |  The regex pattern string.   |  none |
+| <a id="compile-flags"></a>flags |  Regex flags (e.g. re.I, re.M, re.VERBOSE).   |  `0` |
 
 **RETURNS**
 
@@ -49,14 +49,14 @@ The MatchObject returned by these methods has the following members:
 - lastgroup: The name of the last matched capturing group.
 
 
-<a id="re.findall"></a>
+<a id="findall"></a>
 
-## re.findall
+## findall
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "findall")
 
-re.findall(<a href="#re.findall-pattern">pattern</a>, <a href="#re.findall-text">text</a>, <a href="#re.findall-flags">flags</a>)
+findall(<a href="#findall-pattern">pattern</a>, <a href="#findall-text">text</a>, <a href="#findall-flags">flags</a>)
 </pre>
 
 Return all non-overlapping matches of pattern in string, as a list of strings.
@@ -70,23 +70,23 @@ Empty matches are included in the result.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.findall-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.findall-text"></a>text |  The text to match against.   |  none |
-| <a id="re.findall-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="findall-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="findall-text"></a>text |  The text to match against.   |  none |
+| <a id="findall-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
 A list of matching strings or tuples of matching groups.
 
 
-<a id="re.fullmatch"></a>
+<a id="fullmatch"></a>
 
-## re.fullmatch
+## fullmatch
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "fullmatch")
 
-re.fullmatch(<a href="#re.fullmatch-pattern">pattern</a>, <a href="#re.fullmatch-text">text</a>, <a href="#re.fullmatch-flags">flags</a>)
+fullmatch(<a href="#fullmatch-pattern">pattern</a>, <a href="#fullmatch-text">text</a>, <a href="#fullmatch-flags">flags</a>)
 </pre>
 
 Try to apply the pattern to the entire string.
@@ -96,9 +96,9 @@ Try to apply the pattern to the entire string.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.fullmatch-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.fullmatch-text"></a>text |  The text to match against.   |  none |
-| <a id="re.fullmatch-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="fullmatch-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="fullmatch-text"></a>text |  The text to match against.   |  none |
+| <a id="fullmatch-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
@@ -106,14 +106,14 @@ A MatchObject containing the match results, or None if no match was found.
 See `compile` for details on MatchObject.
 
 
-<a id="re.match"></a>
+<a id="match"></a>
 
-## re.match
+## match
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "match")
 
-re.match(<a href="#re.match-pattern">pattern</a>, <a href="#re.match-text">text</a>, <a href="#re.match-flags">flags</a>)
+match(<a href="#match-pattern">pattern</a>, <a href="#match-text">text</a>, <a href="#match-flags">flags</a>)
 </pre>
 
 Try to apply the pattern at the start of the string.
@@ -123,9 +123,9 @@ Try to apply the pattern at the start of the string.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.match-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.match-text"></a>text |  The text to match against.   |  none |
-| <a id="re.match-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="match-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="match-text"></a>text |  The text to match against.   |  none |
+| <a id="match-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
@@ -133,14 +133,14 @@ A MatchObject containing the match results, or None if no match was found.
 See `compile` for details on MatchObject.
 
 
-<a id="re.search"></a>
+<a id="search"></a>
 
-## re.search
+## search
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "search")
 
-re.search(<a href="#re.search-pattern">pattern</a>, <a href="#re.search-text">text</a>, <a href="#re.search-flags">flags</a>)
+search(<a href="#search-pattern">pattern</a>, <a href="#search-text">text</a>, <a href="#search-flags">flags</a>)
 </pre>
 
 Scan through string looking for the first location where the regex pattern produces a match.
@@ -150,9 +150,9 @@ Scan through string looking for the first location where the regex pattern produ
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.search-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.search-text"></a>text |  The text to match against.   |  none |
-| <a id="re.search-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="search-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="search-text"></a>text |  The text to match against.   |  none |
+| <a id="search-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
@@ -160,14 +160,14 @@ A MatchObject containing the match results, or None if no match was found.
 See `compile` for details on MatchObject.
 
 
-<a id="re.split"></a>
+<a id="split"></a>
 
-## re.split
+## split
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "split")
 
-re.split(<a href="#re.split-pattern">pattern</a>, <a href="#re.split-text">text</a>, <a href="#re.split-maxsplit">maxsplit</a>, <a href="#re.split-flags">flags</a>)
+split(<a href="#split-pattern">pattern</a>, <a href="#split-text">text</a>, <a href="#split-maxsplit">maxsplit</a>, <a href="#split-flags">flags</a>)
 </pre>
 
 Split the source string by the occurrences of the pattern, returning a list containing the resulting substrings.
@@ -177,24 +177,24 @@ Split the source string by the occurrences of the pattern, returning a list cont
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.split-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.split-text"></a>text |  The text to split.   |  none |
-| <a id="re.split-maxsplit"></a>maxsplit |  The maximum number of splits to perform. If non-positive, there is no limit on the number of splits.   |  `0` |
-| <a id="re.split-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="split-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="split-text"></a>text |  The text to split.   |  none |
+| <a id="split-maxsplit"></a>maxsplit |  The maximum number of splits to perform. If non-positive, there is no limit on the number of splits.   |  `0` |
+| <a id="split-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
 A list of strings.
 
 
-<a id="re.sub"></a>
+<a id="sub"></a>
 
-## re.sub
+## sub
 
 <pre>
-load("@re.bzl", "re")
+load("@re.bzl//re:re.bzl", "sub")
 
-re.sub(<a href="#re.sub-pattern">pattern</a>, <a href="#re.sub-repl">repl</a>, <a href="#re.sub-text">text</a>, <a href="#re.sub-count">count</a>, <a href="#re.sub-flags">flags</a>)
+sub(<a href="#sub-pattern">pattern</a>, <a href="#sub-repl">repl</a>, <a href="#sub-text">text</a>, <a href="#sub-count">count</a>, <a href="#sub-flags">flags</a>)
 </pre>
 
 Return the string obtained by replacing the leftmost non-overlapping occurrences of the pattern in text by the replacement repl.
@@ -204,11 +204,11 @@ Return the string obtained by replacing the leftmost non-overlapping occurrences
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
-| <a id="re.sub-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
-| <a id="re.sub-repl"></a>repl |  The replacement string or function.   |  none |
-| <a id="re.sub-text"></a>text |  The text to search.   |  none |
-| <a id="re.sub-count"></a>count |  The maximum number of pattern occurrences to replace. If non-positive, all occurrences are replaced.   |  `0` |
-| <a id="re.sub-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="sub-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
+| <a id="sub-repl"></a>repl |  The replacement string or function.   |  none |
+| <a id="sub-text"></a>text |  The text to search.   |  none |
+| <a id="sub-count"></a>count |  The maximum number of pattern occurrences to replace. If non-positive, all occurrences are replaced.   |  `0` |
+| <a id="sub-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
 
 **RETURNS**
 
