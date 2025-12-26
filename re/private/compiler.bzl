@@ -246,12 +246,7 @@ def _new_set_builder(case_insensitive = False):
 
 def _to_hex_4(val):
     """Formats an integer (0-65535) as a 4-digit hex string."""
-    chars = "0123456789abcdef"
-    res = ""
-    for _ in range(4):
-        res = chars[val & 0xF] + res
-        val = val // 16
-    return res
+    return ("000" + ("%x" % val))[-4:]
 
 def _chr(codepoint):
     """Returns a string for the given codepoint."""
@@ -299,14 +294,7 @@ def _parse_escape(pattern, i, pattern_len):
 
         if i + 2 < pattern_len:
             hex_str = pattern[i + 1:i + 3]
-            valid_hex = True
-            for k in range(len(hex_str)):
-                hc = hex_str[k]
-                if not ((hc >= "0" and hc <= "9") or (hc >= "a" and hc <= "f") or (hc >= "A" and hc <= "F")):
-                    valid_hex = False
-                    break
-
-            if valid_hex:
+            if not hex_str.lstrip("0123456789abcdefABCDEF"):
                 return _CHR_LOOKUP[int(hex_str, 16)], i + 2
         return "x", i
 
@@ -314,14 +302,7 @@ def _parse_escape(pattern, i, pattern_len):
         # \uXXXX
         if i + 4 < pattern_len:
             hex_str = pattern[i + 1:i + 5]
-            valid_hex = True
-            for k in range(len(hex_str)):
-                hc = hex_str[k]
-                if not ((hc >= "0" and hc <= "9") or (hc >= "a" and hc <= "f") or (hc >= "A" and hc <= "F")):
-                    valid_hex = False
-                    break
-
-            if valid_hex:
+            if not hex_str.lstrip("0123456789abcdefABCDEF"):
                 val = int(hex_str, 16)
                 return _chr(val), i + 4
         return "u", i
@@ -330,14 +311,7 @@ def _parse_escape(pattern, i, pattern_len):
         # \UXXXXXXXX
         if i + 8 < pattern_len:
             hex_str = pattern[i + 1:i + 9]
-            valid_hex = True
-            for k in range(len(hex_str)):
-                hc = hex_str[k]
-                if not ((hc >= "0" and hc <= "9") or (hc >= "a" and hc <= "f") or (hc >= "A" and hc <= "F")):
-                    valid_hex = False
-                    break
-
-            if valid_hex:
+            if not hex_str.lstrip("0123456789abcdefABCDEF"):
                 val = int(hex_str, 16)
                 return _chr(val), i + 8
         return "U", i

@@ -63,6 +63,7 @@ def run_benchmarks(n = 0):
     Args:
       n: Number of iterations.
     """
+
     print("Running simple_match...")
     benchmark_simple_match(n)
     print("Running complex_match...")
