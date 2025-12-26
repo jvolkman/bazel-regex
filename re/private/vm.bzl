@@ -90,16 +90,16 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 break
 
             inst = instructions[pc]
-            itype = inst.op
+            itype = inst[0]
 
             if itype == OP_JUMP:
-                pc = inst.target
+                pc = inst[2]  # arg1 = target
                 # Continue loop to process new pc
 
             elif itype == OP_SPLIT:
                 # Add both branches
-                pc1 = inst.pc1
-                pc2 = inst.pc2
+                pc1 = inst[2]  # arg1
+                pc2 = inst[3]  # arg2
 
                 # Push lower priority (pc2) first so we follow pc1 (higher priority) immediately
                 # DFS order matters for priority
@@ -108,7 +108,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                 # Continue loop to process pc1
 
             elif itype == OP_SAVE:
-                group_idx = inst.slot
+                group_idx = inst[2]  # arg1 = slot
                 regs = regs[:]  # Copy on write
                 regs[group_idx] = current_idx
 
@@ -150,9 +150,9 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     break
             elif itype == OP_GREEDY_LOOP:
                 # Optimized x* loop logic with Cache
-                chars = inst.val
+                chars = inst[1]  # val
                 match_len = 0
-                is_ci = inst.is_ci
+                is_ci = inst[3]  # arg2 = is_ci
 
                 # Check cache
                 last_end = greedy_cache.get(pc, -1)
@@ -172,7 +172,7 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
 
                 if match_len == 0:
                     # Epsilon transition to Exit
-                    pc = inst.exit_pc
+                    pc = inst[2]  # arg1 = exit_pc
                     # Continue loop to process new pc
 
                 else:
@@ -184,13 +184,13 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     # First visit: Epsilon path (high priority)
                     # Stay in epsilon expansion loop for exit_pc
                     stack += [(pc, regs)]  # Push to stack for second visit (low priority)
-                    pc = inst.exit_pc
+                    pc = inst[2]  # arg1 = exit_pc
                 else:
                     # Second visit (visited[pc] == visited_gen + 1):
                     # Consuming path (low priority)
                     # Use cache to check if we can consume
-                    chars = inst.val
-                    is_ci = inst.is_ci
+                    chars = inst[1]  # val
+                    is_ci = inst[3]  # arg2 = is_ci
                     last_end = greedy_cache.get(pc, -1)
                     match_len = 0
 
@@ -220,7 +220,6 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
     return reachable
 
 # buildifier: disable=list-append
-# buildifier: disable=list-append
 def _process_batch(instructions, batch, input_str, current_idx, input_len, input_lower):
     """Processes a batch of threads against the current character.
 
@@ -244,7 +243,7 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
             continue
 
         inst = instructions[pc]
-        itype = inst.op
+        itype = inst[0]
 
         if itype == OP_MATCH:
             best_match_regs = regs
@@ -255,11 +254,11 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
 
         match_found = False
         if itype == OP_CHAR:
-            check_char = char_lower if inst.is_ci else char
-            match_found = (inst.val == check_char)
+            check_char = char_lower if inst[2] else char  # arg1 = is_ci
+            match_found = (inst[1] == check_char)  # val
         elif itype == OP_STRING:
-            s = inst.val
-            if inst.is_ci:  # is_ci
+            s = inst[1]  # val
+            if inst[2]:  # arg1 = is_ci
                 if input_lower != None:
                     if input_lower.startswith(s, current_idx):
                         match_len = len(s)
@@ -280,26 +279,20 @@ def _process_batch(instructions, batch, input_str, current_idx, input_len, input
         elif itype == OP_ANY_NO_NL:
             match_found = (char != "\n")
         elif itype == OP_SET:
-            set_struct, is_negated = inst.val
-            is_ci = inst.is_ci
+            set_struct, is_negated = inst[1]  # val
+            is_ci = inst[2]  # arg1 = is_ci
             c_check = char_lower if is_ci else char
 
             if c_check in ORD_LOOKUP:
                 match_found = (set_struct.ascii_bitmap[ORD_LOOKUP[c_check]] != is_negated)
             else:
                 match_found = (_char_in_set(set_struct, c_check) != is_negated)
-        elif itype == OP_GREEDY_LOOP:
-            is_ci = inst.is_ci
+        elif itype == OP_GREEDY_LOOP or itype == OP_UNGREEDY_LOOP:
+            is_ci = inst[3]  # arg2 = is_ci
             if is_ci:
-                match_found = (char_lower in inst.val)
+                match_found = (char_lower in inst[1])  # val
             else:
-                match_found = (char in inst.val)
-        elif itype == OP_UNGREEDY_LOOP:
-            is_ci = inst.is_ci
-            if is_ci:
-                match_found = (char_lower in inst.val)
-            else:
-                match_found = (char in inst.val)
+                match_found = (char in inst[1])  # val
 
         if match_found:
             next_pc = pc
@@ -341,7 +334,7 @@ def execute(instructions, input_str, num_regs, start_index = 0, initial_regs = N
     if word_mask == None:
         has_boundary = False
         for inst in instructions:
-            if inst.op == OP_WORD_BOUNDARY or inst.op == OP_NOT_WORD_BOUNDARY:
+            if inst[0] == OP_WORD_BOUNDARY or inst[0] == OP_NOT_WORD_BOUNDARY:
                 has_boundary = True
                 break
         if has_boundary:

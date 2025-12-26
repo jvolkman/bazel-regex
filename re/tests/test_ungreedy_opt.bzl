@@ -43,7 +43,7 @@ def _test_ungreedy_opt_impl(ctx):
         compiled = compile(p)
         found = False
         for inst in compiled.bytecode:
-            if inst.op == OP_UNGREEDY_LOOP:
+            if inst[0] == OP_UNGREEDY_LOOP:
                 found = True
                 break
         asserts.true(env, found, "Pattern %s should be optimized with OP_UNGREEDY_LOOP" % p)
