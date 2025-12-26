@@ -23,6 +23,38 @@ load(
     "ORD_LOOKUP",
 )
 
+_WINDOW_SIZE = 16384
+
+def _windowed_lstrip(s, chars, start):
+    """Lstrips chars from s[start:] using windowing to avoid large copies."""
+    n = len(s)
+    pos = start
+    for _ in range(n // _WINDOW_SIZE + 1):
+        window = s[pos:pos + _WINDOW_SIZE]
+        if not window:
+            break
+        stripped = window.lstrip(chars)
+        match_len = len(window) - len(stripped)
+        pos += match_len
+        if len(stripped) > 0:
+            break
+    return pos - start
+
+def _windowed_rstrip(s, chars, end):
+    """Rstrips chars from s[:end] using windowing to avoid large copies."""
+    pos = end
+    for _ in range(end // _WINDOW_SIZE + 1):
+        start = max(0, pos - _WINDOW_SIZE)
+        window = s[start:pos]
+        if not window:
+            break
+        stripped = window.rstrip(chars)
+        match_len = len(window) - len(stripped)
+        pos -= match_len
+        if len(stripped) > 0:
+            break
+    return end - pos
+
 # Types
 _STRING_TYPE = type("")
 
@@ -161,13 +193,11 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                     match_len = last_end - current_idx
                 else:
                     # Compute and cache
+                    input_to_strip = input_str
                     if is_ci and input_lower != None:
-                        current_slice = input_lower[current_idx:]
-                    else:
-                        current_slice = input_str[current_idx:]
+                        input_to_strip = input_lower
 
-                    stripped = current_slice.lstrip(chars)
-                    match_len = len(current_slice) - len(stripped)
+                    match_len = _windowed_lstrip(input_to_strip, chars, current_idx)
                     greedy_cache[pc] = current_idx + match_len
 
                 if match_len == 0:
@@ -198,13 +228,11 @@ def _get_epsilon_closure(instructions, input_str, input_len, start_pc, start_reg
                         match_len = last_end - current_idx
                     else:
                         # Compute and cache
+                        input_to_strip = input_str
                         if is_ci and input_lower != None:
-                            current_slice = input_lower[current_idx:]
-                        else:
-                            current_slice = input_str[current_idx:]
+                            input_to_strip = input_lower
 
-                        stripped = current_slice.lstrip(chars)
-                        match_len = len(current_slice) - len(stripped)
+                        match_len = _windowed_lstrip(input_to_strip, chars, current_idx)
                         greedy_cache[pc] = current_idx + match_len
 
                     if match_len > 0:
@@ -545,9 +573,8 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
                 # Use rstrip to find where the greedy set starts
                 greedy_start = before_suffix_idx
                 if opt.greedy_set_chars != None:
-                    prefix_plus_middle = text[:before_suffix_idx]
-                    stripped = prefix_plus_middle.rstrip(opt.greedy_set_chars)
-                    greedy_start = len(stripped)
+                    match_len = _windowed_rstrip(text, opt.greedy_set_chars, before_suffix_idx)
+                    greedy_start = before_suffix_idx - match_len
 
                 # else: no greedy_set_chars
 
@@ -607,18 +634,14 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
                 # The leftmost match must start after start_index.
                 search_start = found_idx
                 if opt.greedy_set_chars != None:
-                    # Find furthest back we can go with these chars from this suffix point
-                    prefix_data = text[start_index:found_idx]
-
                     # If the greedy loop is case-insensitive, we must strip case-insensitively.
                     if opt.is_greedy_case_insensitive:
-                        if input_lower != None:
-                            prefix_data = input_lower[start_index:found_idx]
-                        else:
-                            prefix_data = prefix_data.lower()
-
-                    stripped = prefix_data.rstrip(opt.greedy_set_chars)
-                    search_start = start_index + len(stripped)
+                        strip_text = input_lower if input_lower != None else text.lower()
+                        match_len = _windowed_rstrip(strip_text, opt.greedy_set_chars, found_idx)
+                        search_start = start_index + max(0, (found_idx - match_len) - start_index)
+                    else:
+                        match_len = _windowed_rstrip(text, opt.greedy_set_chars, found_idx)
+                        search_start = start_index + max(0, (found_idx - match_len) - start_index)
 
                 if opt.prefix_set_chars != None:
                     if search_start > start_index and text[search_start - 1] in opt.prefix_set_chars:
@@ -630,13 +653,13 @@ def search_regs(bytecode, text, group_count, start_index = 0, has_case_insensiti
                     if opt.is_suffix_disjoint:
                         can_bypass = True
                     elif opt.is_ungreedy_loop:
-                        prefix_loop_data = text[search_start:found_idx]
                         if opt.is_greedy_case_insensitive:
-                            if input_lower != None:
-                                prefix_loop_data = input_lower[search_start:found_idx]
-                            else:
-                                prefix_loop_data = prefix_loop_data.lower()
-                        if prefix_loop_data.lstrip(opt.greedy_set_chars) == "":
+                            strip_text = input_lower if input_lower != None else text.lower()
+                            strip_len = _windowed_lstrip(strip_text, opt.greedy_set_chars, search_start)
+                        else:
+                            strip_len = _windowed_lstrip(text, opt.greedy_set_chars, search_start)
+
+                        if search_start + strip_len >= found_idx:
                             can_bypass = True
 
                 if can_bypass:
@@ -708,8 +731,8 @@ def match_regs(bytecode, text, group_count, start_index = 0, has_case_insensitiv
                         middle_end = len(text) - len(opt.suffix)
                         if middle_end >= middle_start:
                             if opt.greedy_set_chars != None:
-                                middle = text[middle_start:middle_end]
-                                if len(middle.lstrip(opt.greedy_set_chars)) == 0:
+                                strip_len = _windowed_lstrip(text, opt.greedy_set_chars, middle_start)
+                                if middle_start + strip_len >= middle_end:
                                     match_end = len(text)
                                 else:
                                     fast_path_ok = False
@@ -730,8 +753,8 @@ def match_regs(bytecode, text, group_count, start_index = 0, has_case_insensitiv
                         # if it's anchored at the end (handled above) or if it's empty.
                         # Greedy match the rest.
                         if opt.suffix == "":
-                            stripped = rest.lstrip(opt.greedy_set_chars)
-                            match_end += len(rest) - len(stripped)
+                            match_len = _windowed_lstrip(text, opt.greedy_set_chars, match_end)
+                            match_end += match_len
                         else:
                             # Complex case: ^\d+abc (not anchored at end)
                             fast_path_ok = False
@@ -797,8 +820,8 @@ def fullmatch_regs(bytecode, text, group_count, start_index = 0, has_case_insens
                 middle_end = len(text) - len(opt.suffix)
                 if middle_end >= middle_start:
                     if opt.greedy_set_chars != None:
-                        middle = check_text[middle_start:middle_end]
-                        if len(middle.lstrip(opt.greedy_set_chars)) == 0:
+                        strip_len = _windowed_lstrip(check_text, opt.greedy_set_chars, middle_start)
+                        if middle_start + strip_len >= middle_end:
                             match_end = len(text)
                         else:
                             fast_path_ok = False
