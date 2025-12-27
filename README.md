@@ -38,7 +38,7 @@ if prog.search("123"):
 
 This was mostly done as a fun project. Starlark (or any build configuration language) is not an optimal tool for building a regex engine.
 
-That said, it *does* work, and by optimizing for performance within the constraints of Starlark (offloading as much work as possible to Java-backed string methods), it has shown to be as fast as custom parsing logic in when used on real-world input in [toml.bzl](https://github.com/jvolkman/toml.bzl).
+That said, it *does* work, and by optimizing for performance within the constraints of Starlark (offloading as much work as possible to Java-backed string methods), it has shown to be as fast as custom parsing logic in when used on real-world input in [toml.bzl](https://github.com/jvolkman/toml.bzl) while offering concise way to describe token matching expressions.
 
 ## Syntax Reference
 
