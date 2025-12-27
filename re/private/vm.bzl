@@ -23,7 +23,10 @@ load(
     "ORD_LOOKUP",
 )
 
-_WINDOW_SIZE = 16384
+# Default window size for windowed string operations.
+# Windowing avoids creating massive intermediate string slices, which can
+# lead to O(N^2) memory and time behavior in Starlark for large inputs.
+_WINDOW_SIZE = 65536
 
 def _windowed_lstrip(s, chars, start):
     """Lstrips chars from s[start:] using windowing to avoid large copies."""
@@ -766,24 +769,35 @@ def match_regs(bytecode, text, group_count, start_index = 0, end_index = None, h
                             fast_path_ok = False
                     else:
                         fast_path_ok = False
-                else:
-                    # Not anchored at end
-                    if opt.greedy_set_chars != None:
-                        # If there is a suffix, we only support it in the fast path
-                        # if it's anchored at the end (handled above) or if it's empty.
-                        # Greedy match the rest.
-                        if opt.suffix == "":
-                            match_len = _windowed_lstrip(text[:effective_len], opt.greedy_set_chars, match_end)
-                            match_end += match_len
+                elif opt.suffix != "":
+                    # Case: ^a*b (not anchored at end)
+                    # Find first occurrence of suffix after match_end
+                    found_idx = text.find(opt.suffix, match_end)
+                    if found_idx != -1 and found_idx + len(opt.suffix) <= effective_len:
+                        # Check if everything between match_end and found_idx is in greedy_set
+                        if opt.greedy_set_chars != None:
+                            strip_len = _windowed_lstrip(text, opt.greedy_set_chars, match_end)
+                            if match_end + strip_len >= found_idx:
+                                match_end = found_idx + len(opt.suffix)
+                            else:
+                                fast_path_ok = False
                         else:
-                            # Complex case: ^\d+abc (not anchored at end)
-                            fast_path_ok = False
+                            # No greedy set, suffix must follow prefix immediately
+                            if match_end == found_idx:
+                                match_end = found_idx + len(opt.suffix)
+                            else:
+                                fast_path_ok = False
                     else:
-                        # No greedy set, just prefix(+set) and suffix
-                        if text[match_end:].startswith(opt.suffix):
-                            match_end += len(opt.suffix)
-                        else:
-                            fast_path_ok = False
+                        fast_path_ok = False
+                else:
+                    # No suffix, not anchored at end
+                    if opt.greedy_set_chars != None:
+                        # Greedy match the rest.
+                        match_len = _windowed_lstrip(text[:effective_len], opt.greedy_set_chars, match_end)
+                        match_end += match_len
+                    else:
+                        # No greedy set, just prefix(+set)
+                        pass
 
             if fast_path_ok:
                 regs = [-1] * ((group_count + 1) * 2 + 1)

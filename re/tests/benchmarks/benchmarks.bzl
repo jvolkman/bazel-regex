@@ -56,6 +56,14 @@ def _benchmark_fast_path_group(n):
         search(p2, t2)
         search(p3, t3)
 
+# Very large input benchmark (1MB)
+def benchmark_very_large_input(n):
+    text = "a" * 1000000 + "b"
+    p = compile(r"a*b")
+    for _ in range(n):
+        search(p, text)
+        match(p, text)
+
 # buildifier: disable=print
 def run_benchmarks(n = 0):
     """Runs all benchmarks.
@@ -76,5 +84,7 @@ def run_benchmarks(n = 0):
     benchmark_case_insensitive(n)
     print("Running case_insensitive_greedy...")
     benchmark_case_insensitive_greedy(n)
+    print("Running very_large_input...")
+    benchmark_very_large_input(n)
     print("Running fast_path optimizations...")
     _benchmark_fast_path_group(n)
