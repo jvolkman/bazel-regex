@@ -56,14 +56,14 @@ def compile(pattern, flags = 0):
     bytecode, named_groups, group_count, has_case_insensitive = compile_regex(pattern, flags = flags)
     opt = optimize_matcher(bytecode)
 
-    def _search(text):
-        return search_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+    def _search(text, pos = 0, endpos = None):
+        return search_bytecode(bytecode, text, named_groups, group_count, start_index = pos, end_index = endpos, has_case_insensitive = has_case_insensitive, opt = opt)
 
-    def _match(text):
-        return match_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+    def _match(text, pos = 0, endpos = None):
+        return match_bytecode(bytecode, text, named_groups, group_count, start_index = pos, end_index = endpos, has_case_insensitive = has_case_insensitive, opt = opt)
 
-    def _fullmatch(text):
-        return fullmatch_bytecode(bytecode, text, named_groups, group_count, has_case_insensitive = has_case_insensitive, opt = opt)
+    def _fullmatch(text, pos = 0, endpos = None):
+        return fullmatch_bytecode(bytecode, text, named_groups, group_count, start_index = pos, end_index = endpos, has_case_insensitive = has_case_insensitive, opt = opt)
 
     return struct(
         search = _search,
@@ -77,50 +77,56 @@ def compile(pattern, flags = 0):
         opt = opt,
     )
 
-def search(pattern, text, flags = 0):
+def search(pattern, text, flags = 0, pos = 0, endpos = None):
     """Scan through string looking for the first location where the regex pattern produces a match.
 
     Args:
       pattern: The regex pattern string or a compiled regex object.
       text: The text to match against.
       flags: Regex flags (only if pattern is a string).
+      pos: Start position.
+      endpos: End position.
 
     Returns:
       A MatchObject containing the match results, or None if no match was found.
       See `compile` for details on MatchObject.
     """
     compiled = compile(pattern, flags = flags)
-    return search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+    return search_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = pos, end_index = endpos, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
-def match(pattern, text, flags = 0):
+def match(pattern, text, flags = 0, pos = 0, endpos = None):
     """Try to apply the pattern at the start of the string.
 
     Args:
       pattern: The regex pattern string or a compiled regex object.
       text: The text to match against.
       flags: Regex flags (only if pattern is a string).
+      pos: Start position.
+      endpos: End position.
 
     Returns:
       A MatchObject containing the match results, or None if no match was found.
       See `compile` for details on MatchObject.
     """
     compiled = compile(pattern, flags = flags)
-    return match_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+    return match_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = pos, end_index = endpos, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
-def fullmatch(pattern, text, flags = 0):
+def fullmatch(pattern, text, flags = 0, pos = 0, endpos = None):
     """Try to apply the pattern to the entire string.
 
     Args:
       pattern: The regex pattern string or a compiled regex object.
       text: The text to match against.
       flags: Regex flags (only if pattern is a string).
+      pos: Start position.
+      endpos: End position.
 
     Returns:
       A MatchObject containing the match results, or None if no match was found.
       See `compile` for details on MatchObject.
     """
     compiled = compile(pattern, flags = flags)
-    return fullmatch_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = 0, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
+    return fullmatch_bytecode(compiled.bytecode, text, compiled.named_groups, compiled.group_count, start_index = pos, end_index = endpos, has_case_insensitive = compiled.has_case_insensitive, opt = compiled.opt)
 
 # buildifier: disable=list-append
 def findall(pattern, text, flags = 0):

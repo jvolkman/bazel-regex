@@ -149,3 +149,21 @@ def run_tests_api(env):
     assert_eq(env, m_alt.group("left"), None, "unmatched named group should return None")
     assert_eq(env, m_alt.group("right"), "b", "matched named group should return value")
     assert_eq(env, m_alt.lastgroup, "right", "lastgroup should be the matched named group")
+
+    # 14. endpos support
+    assert_eq(env, bool(search("abc", "xabcy", endpos = 4)), True, "search with endpos (exact)")
+    assert_eq(env, bool(search("abc", "xabcy", endpos = 3)), False, "search with endpos (too early)")
+    assert_eq(env, bool(match("abc", "abcy", endpos = 3)), True, "match with endpos (exact)")
+    assert_eq(env, bool(match("abc", "abcy", endpos = 2)), False, "match with endpos (too early)")
+    assert_eq(env, bool(fullmatch("abc", "abc", endpos = 3)), True, "fullmatch with endpos (exact)")
+    assert_eq(env, bool(fullmatch("abc", "abc", endpos = 2)), False, "fullmatch with endpos (too early)")
+
+    # endpos on compiled object
+    prog = compile("abc")
+    assert_eq(env, bool(prog.search("xabcy", endpos = 4)), True, "compiled search with endpos")
+    assert_eq(env, bool(prog.match("abcy", endpos = 3)), True, "compiled match with endpos")
+    assert_eq(env, bool(prog.fullmatch("abc", endpos = 3)), True, "compiled fullmatch with endpos")
+
+    # endpos should act as the end of the string for anchors
+    assert_eq(env, bool(search("abc$", "xabcy", endpos = 4)), True, "endpos works with $ anchor")
+    assert_eq(env, bool(match(r"abc\b", "abc.def", endpos = 3)), True, "endpos works with \b boundary")

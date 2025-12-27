@@ -86,7 +86,7 @@ A list of matching strings or tuples of matching groups.
 <pre>
 load("@re.bzl//re:re.bzl", "fullmatch")
 
-fullmatch(<a href="#fullmatch-pattern">pattern</a>, <a href="#fullmatch-text">text</a>, <a href="#fullmatch-flags">flags</a>)
+fullmatch(<a href="#fullmatch-pattern">pattern</a>, <a href="#fullmatch-text">text</a>, <a href="#fullmatch-flags">flags</a>, <a href="#fullmatch-pos">pos</a>, <a href="#fullmatch-endpos">endpos</a>)
 </pre>
 
 Try to apply the pattern to the entire string.
@@ -99,6 +99,8 @@ Try to apply the pattern to the entire string.
 | <a id="fullmatch-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
 | <a id="fullmatch-text"></a>text |  The text to match against.   |  none |
 | <a id="fullmatch-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="fullmatch-pos"></a>pos |  Start position.   |  `0` |
+| <a id="fullmatch-endpos"></a>endpos |  End position.   |  `None` |
 
 **RETURNS**
 
@@ -113,7 +115,7 @@ See `compile` for details on MatchObject.
 <pre>
 load("@re.bzl//re:re.bzl", "match")
 
-match(<a href="#match-pattern">pattern</a>, <a href="#match-text">text</a>, <a href="#match-flags">flags</a>)
+match(<a href="#match-pattern">pattern</a>, <a href="#match-text">text</a>, <a href="#match-flags">flags</a>, <a href="#match-pos">pos</a>, <a href="#match-endpos">endpos</a>)
 </pre>
 
 Try to apply the pattern at the start of the string.
@@ -126,6 +128,8 @@ Try to apply the pattern at the start of the string.
 | <a id="match-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
 | <a id="match-text"></a>text |  The text to match against.   |  none |
 | <a id="match-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="match-pos"></a>pos |  Start position.   |  `0` |
+| <a id="match-endpos"></a>endpos |  End position.   |  `None` |
 
 **RETURNS**
 
@@ -140,7 +144,7 @@ See `compile` for details on MatchObject.
 <pre>
 load("@re.bzl//re:re.bzl", "search")
 
-search(<a href="#search-pattern">pattern</a>, <a href="#search-text">text</a>, <a href="#search-flags">flags</a>)
+search(<a href="#search-pattern">pattern</a>, <a href="#search-text">text</a>, <a href="#search-flags">flags</a>, <a href="#search-pos">pos</a>, <a href="#search-endpos">endpos</a>)
 </pre>
 
 Scan through string looking for the first location where the regex pattern produces a match.
@@ -153,6 +157,8 @@ Scan through string looking for the first location where the regex pattern produ
 | <a id="search-pattern"></a>pattern |  The regex pattern string or a compiled regex object.   |  none |
 | <a id="search-text"></a>text |  The text to match against.   |  none |
 | <a id="search-flags"></a>flags |  Regex flags (only if pattern is a string).   |  `0` |
+| <a id="search-pos"></a>pos |  Start position.   |  `0` |
+| <a id="search-endpos"></a>endpos |  End position.   |  `None` |
 
 **RETURNS**
 

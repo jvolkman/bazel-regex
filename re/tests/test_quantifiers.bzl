@@ -59,5 +59,7 @@ def run_tests_quantifiers(env):
         ("a?a?a?a?a?a?a?a?a?a?aaaaaaaaaa", "aaaaaaaaaa", {0: "aaaaaaaaaa"}),
         ("a{100}", "a" * 100, {0: "a" * 100}),
         ("a{100}", "a" * 99, None),
+        # 7. Regression: Greedy match with optional group at end
+        (r"\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2})?", "1979-05-27T07:32", {0: "1979-05-27T07:32"}),
     ]
     run_suite(env, "Quantifier Tests", cases)
