@@ -2,15 +2,17 @@
 Tests for regex groups and backreferences.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_groups_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_groups(env):
     run_tests_groups(env)
-    return unittest.end(env)
 
-groups_test = unittest.make(_test_groups_impl)
+def groups_test(name):
+    unit_test(
+        name = name,
+        impl = _test_groups,
+    )
 
 def run_tests_groups(env):
     """Runs group tests.

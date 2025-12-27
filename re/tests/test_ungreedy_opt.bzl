@@ -2,19 +2,12 @@
 Tests for ungreedy loop optimization.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re:re.bzl", "compile", "search")
 load("//re/private:constants.bzl", "OP_UNGREEDY_LOOP")
 
-def _test_ungreedy_opt_impl(ctx):
-    env = unittest.begin(ctx)
-
+def _test_ungreedy_opt(env):
     # 1. Functional correctness
-    # a*?b matches "aaab" -> "b" at index 3? No, find(a*?b, aaab) -> "aab" at 0 doesn't make sense.
-    # match(a*?b, aaab) -> "" + "b" is not possible.
-    # a*?b matches "b" -> "" + "b" = "b"
-    # a*?b matches "ab" -> "a" + "b" = "ab"
-
     cases = [
         ("a*?b", "aaab", "aaab"),
         ("a*?b", "b", "b"),
@@ -25,14 +18,11 @@ def _test_ungreedy_opt_impl(ctx):
 
     for pattern, text, expected in cases:
         m = search(pattern, text)
-        asserts.true(env, m != None, "Pattern %s should match %s" % (pattern, text))
+        env.expect.that_bool(m != None).equals(True)
         if m:
-            asserts.equals(env, expected, m.group(0))
+            env.expect.that_str(m.group(0)).equals(expected)
 
     # 2. Bytecode inspection
-    # We need to expose internal bytecode for inspection or use a debug helper.
-    # Since re.compile returns a struct with 'instructions', we can check that.
-
     patterns_to_check = [
         "a*?b",
         "[0-9]*?x",
@@ -46,8 +36,10 @@ def _test_ungreedy_opt_impl(ctx):
             if inst[0] == OP_UNGREEDY_LOOP:
                 found = True
                 break
-        asserts.true(env, found, "Pattern %s should be optimized with OP_UNGREEDY_LOOP" % p)
+        env.expect.that_bool(found).equals(True)
 
-    return unittest.end(env)
-
-ungreedy_opt_test = unittest.make(_test_ungreedy_opt_impl)
+def ungreedy_opt_test(name):
+    unit_test(
+        name = name,
+        impl = _test_ungreedy_opt,
+    )

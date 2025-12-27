@@ -2,15 +2,17 @@
 Tests for regex quantifiers.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_quantifiers_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_quantifiers(env):
     run_tests_quantifiers(env)
-    return unittest.end(env)
 
-quantifiers_test = unittest.make(_test_quantifiers_impl)
+def quantifiers_test(name):
+    unit_test(
+        name = name,
+        impl = _test_quantifiers,
+    )
 
 def run_tests_quantifiers(env):
     """Runs quantifier tests.

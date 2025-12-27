@@ -6,9 +6,6 @@ A pure Starlark implementation of a Regex engine. Vibe coded with Gemini.
 
 `re.bzl` provides a Thompson NFA-based regex engine designed for Bazel. It provides a significant subset of RE2 syntax with linear-time performance guarantees.
 
-> [!NOTE]
-> This was mostly done as a fun project, and while it *does* work, Starlark (or any build configuration language) is not an optimal tool for building a regex engine.
-
 ## Usage
 
 For full API documentation, see [the API Reference](docs/re.md).
@@ -36,6 +33,12 @@ prog = re.compile(r"\d+")
 if prog.search("123"):
     print("Found digits")
 ```
+
+## Performance and Feasibility
+
+This was mostly done as a fun project. Starlark (or any build configuration language) is not an optimal tool for building a regex engine.
+
+That said, it *does* work, and by optimizing for performance within the constraints of Starlark (offloading as much work as possible to Java-backed string methods), it has shown to be as fast as custom parsing logic in when used on real-world input in [toml.bzl](https://github.com/jvolkman/toml.bzl).
 
 ## Syntax Reference
 
@@ -138,24 +141,16 @@ if prog.search("123"):
 
 `re.bzl` aims for high compatibility with [RE2 syntax](https://github.com/google/re2/blob/main/doc/syntax.txt). Most non-Unicode features are supported.
 
-### Key Differences
-- **Unicode Support**:
-    - Starlark strings are sequences of **environment-dependent** elements (UTF-K).
-        - In **Bazel (Java)**: Strings are UTF-16. `.` matches one UTF-16 code unit. Non-BMP characters (like `🚀`) are 2 units (surrogate pair). `len('🚀') == 2`.
-        - In **starlark-go**: Strings are UTF-8. `.` matches one byte. `🚀` is 4 bytes. `len('🚀') == 4`.
+Like RE2, `re.bzl` does not support backreferences and lookarounds.
+
+### Unicode Support
+
+Starlark strings are sequences of **environment-dependent** elements (UTF-K).
+    - In **Bazel (Java)**: Strings are UTF-16. `.` matches one UTF-16 code unit. Non-BMP characters (like `🚀`) are 2 units (surrogate pair). `len('🚀') == 2`.
+    - In **starlark-go**: Strings are UTF-8. `.` matches one byte. `🚀` is 4 bytes. `len('🚀') == 4`.
     - Character classes `[...]` and `[^...]` operate on these individual elements.
     - Quantifiers apply to the preceding atom. For multibyte/multi-unit characters, you must group them (e.g., `(🚀)+`) to match the full sequence.
     - Unicode character categories (`\p{...}`) are not supported.
-- **Backreferences**: Not supported (consistent with RE2's linear-time guarantee).
-- **Lookarounds**: Not supported.
-
-## Performance
-
-While `re.bzl` attempts to optimize for performance, it's... still written in Starlark. To maximize efficiency within these constraints, the engine leverages several key strategies:
-
-- **Thompson NFA**: Guarantees $O(N \times S)$ time complexity (where $N$ is input length and $S$ is state count). This provides linear-time performance and prevents ReDoS (Regular Expression Denial of Service) attacks that can occur with backtracking engines.
-- **Native String Offloading**: To avoid the overhead of Starlark's high-level operations, the engine offloads as much work as possible to native C++/Java-backed string methods like `find()`, `lstrip()`, `rstrip()`, and `startswith()`.
-- **Pre-computation**: Expensive operations—such as computing lowercase versions for case-insensitive matches or generating word-character masks—are performed once during compilation or initial execution setup. This keeps the inner match loop as tight as possible.
 
 ## Installation
 

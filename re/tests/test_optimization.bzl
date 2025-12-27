@@ -2,15 +2,17 @@
 Tests for fast-path repetition optimizations.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_optimization_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_optimization(env):
     run_tests_optimization(env)
-    return unittest.end(env)
 
-optimization_test = unittest.make(_test_optimization_impl)
+def optimization_test(name):
+    unit_test(
+        name = name,
+        impl = _test_optimization,
+    )
 
 def run_tests_optimization(env):
     """Runs optimization tests.

@@ -2,15 +2,17 @@
 Tests for core regex functionality.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_core_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_core(env):
     run_tests_core(env)
-    return unittest.end(env)
 
-core_test = unittest.make(_test_core_impl)
+def core_test(name):
+    unit_test(
+        name = name,
+        impl = _test_core,
+    )
 
 def run_tests_core(env):
     """Runs core tests.

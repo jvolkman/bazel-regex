@@ -2,16 +2,18 @@
 Tests for the high-level API functions: findall, sub, split.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re:re.bzl", "compile", "findall", "fullmatch", "match", "search", "split", "sub")
 load("//re/tests:utils.bzl", "assert_eq")
 
-def _test_api_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_api(env):
     run_tests_api(env)
-    return unittest.end(env)
 
-api_test = unittest.make(_test_api_impl)
+def api_test(name):
+    unit_test(
+        name = name,
+        impl = _test_api,
+    )
 
 def run_tests_api(env):
     """Runs API tests.

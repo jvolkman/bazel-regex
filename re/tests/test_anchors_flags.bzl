@@ -2,15 +2,17 @@
 Tests for regex anchors and flags.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_anchors_flags_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_anchors_flags(env):
     run_tests_anchors_flags(env)
-    return unittest.end(env)
 
-anchors_flags_test = unittest.make(_test_anchors_flags_impl)
+def anchors_flags_test(name):
+    unit_test(
+        name = name,
+        impl = _test_anchors_flags,
+    )
 
 def run_tests_anchors_flags(env):
     """Runs anchors and flags tests.

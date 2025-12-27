@@ -2,15 +2,17 @@
 Tests for escaping special characters.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "assert_match")
 
-def _test_escape_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_escape(env):
     run_tests_escape(env)
-    return unittest.end(env)
 
-escape_test = unittest.make(_test_escape_impl)
+def escape_test(name):
+    unit_test(
+        name = name,
+        impl = _test_escape,
+    )
 
 def run_tests_escape(env):
     """Runs escape tests.

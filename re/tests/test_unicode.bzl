@@ -2,15 +2,17 @@
 Tests for Unicode character support.
 """
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests:utils.bzl", "run_suite")
 
-def _test_unicode_impl(ctx):
-    env = unittest.begin(ctx)
+def _test_unicode(env):
     run_tests_unicode(env)
-    return unittest.end(env)
 
-unicode_test = unittest.make(_test_unicode_impl)
+def unicode_test(name):
+    unit_test(
+        name = name,
+        impl = _test_unicode,
+    )
 
 def run_tests_unicode(env):
     """Runs Unicode tests."""

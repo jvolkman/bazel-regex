@@ -1,15 +1,14 @@
 """Benchmark test for the Starlark regex engine."""
 
-load("@bazel_skylib//lib:unittest.bzl", "unittest")
+load("@rules_testing//lib:unit_test.bzl", "unit_test")
 load("//re/tests/benchmarks:benchmarks.bzl", "run_benchmarks")
 
-def _benchmark_test_impl(ctx):
-    env = unittest.begin(ctx)
-
+def _benchmark_test(_env):
     # Run benchmarks with a large number of iterations
-    # The time will be measured by Bazel
     run_benchmarks(n = 1000)
 
-    return unittest.end(env)
-
-benchmark_test = unittest.make(_benchmark_test_impl)
+def benchmark_test(name):
+    unit_test(
+        name = name,
+        impl = _benchmark_test,
+    )
