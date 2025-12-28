@@ -1,6 +1,8 @@
 module(name = "re_smoke_test")
 
 bazel_dep(name = "re.bzl", version = "0.0.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+
 local_path_override(
     module_name = "re.bzl",
     path = "../..",
