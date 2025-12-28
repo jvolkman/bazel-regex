@@ -25,15 +25,18 @@ To accurately measure performance changes:
 Based on profiling within the `re.bzl` codebase, the following patterns are significantly more efficient in Starlark:
 
 ### 1. Prefer Operators Over Method Calls
+
 Operators are built-in to the Starlark interpreter and avoid the overhead of method lookup and dispatch.
 
 - **List Append**: Use `list += [item]` instead of `list.append(item)`.
-    - *Result*: `+= [item]` is approximately **2x faster** than `.append()`.
+  - _Result_: `+= [item]` is approximately **2x faster** than `.append()`.
 - **List Copy**: Use `list_copy = original[:]` instead of `list_copy = list(original)`.
-    - *Result*: `[:]` slicing is approximately **2.5x faster** than `list()`.
+  - _Result_: `[:]` slicing is approximately **2.5x faster** than `list()`.
 
 ### 2. Fast Path Scanning
+
 For unanchored searches, use `input_str.find(literal)` or `input_str.lstrip(chars)` to quickly skip large portions of the input before starting the full NFA simulation.
 
 ### 3. Caching Greedy Loops
+
 When using `OP_GREEDY_LOOP` in unanchored searches, memoize the absolute end position of the loop. This prevents $O(N^2)$ behavior where the same segment is re-scanned for every possible start position.

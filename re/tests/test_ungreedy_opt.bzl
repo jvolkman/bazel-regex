@@ -12,7 +12,7 @@ def _test_ungreedy_opt(env):
         ("a*?b", "aaab", "aaab"),
         ("a*?b", "b", "b"),
         ("[a-z]*?1", "abc1", "abc1"),
-        (".*?a", "baaa", "ba"),  # Ungreedy loop stops at first 'a'
+        (".*?a", "zaaa", "za"),  # Ungreedy loop stops at first 'a'
         ("a*?a", "aaaa", "a"),
     ]
 

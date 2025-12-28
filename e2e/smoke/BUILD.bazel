@@ -1,0 +1,3 @@
+load(":check_re.bzl", "smoke_test")
+
+smoke_test(name = "smoke_test")
