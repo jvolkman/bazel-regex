@@ -159,7 +159,6 @@ def findall(pattern, text, flags = 0):
     if has_case_insensitive:
         input_lower = text.lower()
 
-    # Simulate while loop
     # Max possible matches is len(text) + 1 (for empty matches)
     for _ in range(text_len + 2):
         regs = search_regs(bytecode, text, group_count, start_index = start_index, has_case_insensitive = has_case_insensitive, opt = opt, input_lower = input_lower)
@@ -241,7 +240,6 @@ def sub(pattern, repl, text, count = 0, flags = 0):
     if has_case_insensitive:
         input_lower = text.lower()
 
-    # Simulate while loop
     for _ in range(text_len + 2):
         if count > 0 and matches_found >= count:
             break
@@ -328,7 +326,6 @@ def split(pattern, text, maxsplit = 0, flags = 0):
     if has_case_insensitive:
         input_lower = text.lower()
 
-    # Simulate while loop
     for _ in range(text_len + 2):
         if maxsplit > 0 and splits_found >= maxsplit:
             break
