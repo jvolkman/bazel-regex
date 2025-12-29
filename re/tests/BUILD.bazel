@@ -1,8 +1,9 @@
 load("@bazel_lib//:bzl_library.bzl", "bzl_library")
-load("//re/tests:test_anchors_flags.bzl", "anchors_flags_test")
+load("//re/tests:test_anchors.bzl", "anchors_test")
 load("//re/tests:test_api.bzl", "api_test")
 load("//re/tests:test_core.bzl", "core_test")
 load("//re/tests:test_escape.bzl", "escape_test")
+load("//re/tests:test_flags.bzl", "flags_test")
 load("//re/tests:test_groups.bzl", "groups_test")
 load("//re/tests:test_optimization.bzl", "optimization_test")
 load("//re/tests:test_quantifiers.bzl", "quantifiers_test")
@@ -22,7 +23,7 @@ bzl_library(
     ],
 )
 
-anchors_flags_test(name = "anchors_flags_test")
+anchors_test(name = "anchors_test")
 
 api_test(name = "api_test")
 
@@ -42,15 +43,18 @@ root_import_test(name = "root_import_test")
 
 verbose_test(name = "verbose_test")
 
+flags_test(name = "flags_test")
+
 ungreedy_opt_test(name = "ungreedy_opt_test")
 
 test_suite(
     name = "all_tests",
     tests = [
-        ":anchors_flags_test",
+        ":anchors_test",
         ":api_test",
         ":core_test",
         ":escape_test",
+        ":flags_test",
         ":groups_test",
         ":optimization_test",
         ":quantifiers_test",

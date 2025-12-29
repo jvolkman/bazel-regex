@@ -34,23 +34,30 @@ def assert_eq(env, actual, expected, msg):
     if actual != expected:
         env.fail(msg + "\nExpected: %s\nActual: %s" % (expected, actual))
 
-def run_suite(env, name, cases):
+def run_suite(env, name, cases, flags = 0):
     """Runs a suite of regex tests.
 
     Args:
       env: The test environment.
       name: The name of the test suite.
-      cases: A list of (pattern, text, expected_dict) tuples.
+      cases: A list of (pattern, text, expected_dict) or (pattern, text, expected_dict, flags) tuples.
+      flags: Default flags to use if not specified in case.
     """
-    for pattern, text, expected in cases:
-        res = search(pattern, text)
+    for case in cases:
+        c_flags = flags
+        if len(case) == 4:
+            pattern, text, expected, c_flags = case
+        else:
+            pattern, text, expected = case
+
+        res = search(pattern, text, flags = c_flags)
         if expected == None:
             if res != None:
-                env.fail("Pattern: '%s', Text: '%s' expected None, got match '%s'" % (pattern, text, res.group(0)))
+                env.fail("Suite '%s' - Pattern: '%s', Text: '%s' expected None, got match '%s'" % (name, pattern, text, res.group(0)))
         elif res == None:
-            env.fail("Pattern: '%s', Text: '%s' expected match, got None" % (pattern, text))
+            env.fail("Suite '%s' - Pattern: '%s', Text: '%s' expected match, got None" % (name, pattern, text, res.group(0)))
         else:
             for k, v in expected.items():
                 val = res.group(k)
                 if val != v:
-                    env.fail("Pattern: '%s', Text: '%s' group %s mismatch. Expected '%s', got '%s'" % (pattern, text, k, v, val))
+                    env.fail("Suite '%s' - Pattern: '%s', Text: '%s' group %s mismatch. Expected '%s', got '%s'" % (name, pattern, text, k, v, val))

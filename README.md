@@ -93,12 +93,13 @@ That said, it _does_ work, and by optimizing for performance within the constrai
 
 ### Flags
 
-| Flag | Description                                                                   |
-| :--- | :---------------------------------------------------------------------------- |
-| `i`  | case-insensitive (default false)                                              |
-| `m`  | multi-line mode: `^` and `$` match begin/end line (default false)             |
-| `s`  | let `.` match `\n` (default false)                                            |
-| `U`  | ungreedy: swap meaning of `x*` and `x*?`, `x+` and `x+?`, etc (default false) |
+| Flag | API Constant(s)         | Description                                                       |
+| :--- | :---------------------- | :---------------------------------------------------------------- |
+| `i`  | `re.I`, `re.IGNORECASE` | case-insensitive (default false)                                  |
+| `m`  | `re.M`, `re.MULTILINE`  | multi-line mode: `^` and `$` match begin/end line (default false) |
+| `s`  | `re.S`, `re.DOTALL`     | let `.` match `\n` (default false)                                |
+| `x`  | `re.X`, `re.VERBOSE`    | verbose: ignore whitespace and allow comments (default false)     |
+| `U`  | `re.U`, `re.UNGREEDY`   | ungreedy: swap meaning of `x*` and `x*?`, etc (default false)     |
 
 ### Empty strings (Anchors)
 
